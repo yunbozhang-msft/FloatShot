@@ -1,5 +1,5 @@
 #define MyAppName "FloatShot"
-#define MyAppVersion "0.2.0"
+#define MyAppVersion "0.2.1"
 #define MyAppPublisher "FloatShot"
 #define MyAppExeName "FloatShot.exe"
 
@@ -21,6 +21,8 @@ PrivilegesRequired=lowest
 SetupIconFile=..\src\FloatShot\Resources\floatshot.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 WizardStyle=modern
+CloseApplications=no
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -42,3 +44,12 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch FloatShot"; Flags: nowai
 
 [UninstallRun]
 Filename: "taskkill"; Parameters: "/IM FloatShot.exe /F"; Flags: runhidden; RunOnceId: "StopFloatShot"
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+	ResultCode: Integer;
+begin
+	Exec(ExpandConstant('{cmd}'), '/C taskkill /IM FloatShot.exe /F >NUL 2>&1', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+	Result := '';
+end;

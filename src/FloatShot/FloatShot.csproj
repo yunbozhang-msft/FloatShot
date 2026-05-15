@@ -9,9 +9,9 @@
     <RootNamespace>FloatShot</RootNamespace>
     <AssemblyName>FloatShot</AssemblyName>
     <ApplicationIcon>Resources\floatshot.ico</ApplicationIcon>
-    <Version>0.2.0</Version>
-    <FileVersion>0.2.0</FileVersion>
-    <AssemblyVersion>0.2.0</AssemblyVersion>
+    <Version>0.2.1</Version>
+    <FileVersion>0.2.1</FileVersion>
+    <AssemblyVersion>0.2.1</AssemblyVersion>
     <Company>FloatShot</Company>
     <Product>FloatShot</Product>
     <Description>Floating screenshot button visible across virtual desktops and remote desktop sessions.</Description>
