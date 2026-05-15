@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Drawing;
+using System.Reflection;
 using System.Windows.Forms;
 
 namespace FloatShot;
@@ -194,11 +195,19 @@ internal sealed class TrayContext : ApplicationContext
 
     private void ShowAbout()
     {
+        var version = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion.Split('+')[0] ?? Application.ProductVersion;
+
         MessageBox.Show(
-            "FloatShot\n\n" +
-            "A floating screenshot button visible across virtual desktops\n" +
-            "and remote desktop sessions (Windows 365, AVD, RDP).\n\n" +
-            "MIT License | github.com/<your>/floatshot",
+            $"FloatShot {version}\n\n" +
+            "Screenshot helper for Windows App + Dev Box / Cloud PC.\n\n" +
+            "Use it when Teams runs inside the remote desktop but\n" +
+            "in-session screenshots show blank, black, or white meeting\n" +
+            "content because Teams VDI media is rendered locally.\n\n" +
+            "FloatShot captures the local screen. It does not bypass\n" +
+            "screen capture protection or security policy.\n\n" +
+            "MIT License",
             "About FloatShot",
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);

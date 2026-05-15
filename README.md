@@ -1,12 +1,26 @@
 # FloatShot
 
-FloatShot is a lightweight Windows screenshot helper for a very specific remote-work problem: taking usable screenshots while you are connected to a Dev Box, Cloud PC, or Azure Virtual Desktop session through Windows App and Microsoft Teams is running inside that remote desktop.
+FloatShot fixes one annoying screenshot problem:
 
-In optimized Teams VDI sessions, Teams media such as video feeds and incoming screen sharing can be rendered on the local endpoint instead of entirely inside the remote VM. Microsoft documents this architecture in [New VDI solution for Teams](https://learn.microsoft.com/en-us/microsoftteams/vdi-2): the VDI client loads a Teams plugin and starts `MsTeamsVdi.exe` on the user's device, while the Teams app in the VM communicates with it through a virtual channel. Microsoft also lists a known issue for screenshots: users trying to take a screenshot of Teams content, such as incoming screen sharing or video feeds, can't capture that content because it's rendered, or offloaded, on the user's device; the captured result can be a black square.
+> You are using **Windows App** to connect to a **Dev Box / Cloud PC / Azure Virtual Desktop**, and you join a **Microsoft Teams meeting inside the remote desktop**. When you take a screenshot inside the remote session, Teams meeting content may come out blank, black, or white.
 
-That means a screenshot tool running inside the Dev Box can capture only what the VM sees, not necessarily the optimized Teams media that Windows App is presenting on your physical PC. FloatShot runs on the local Windows endpoint and floats above the Windows App session, so it captures the pixels as they are presented locally.
+FloatShot runs on your **local Windows PC**, floats above the full-screen Windows App session, and captures what is actually shown on your local screen.
 
-## What It Does
+This is useful because optimized Teams VDI media can be rendered on the local endpoint instead of fully inside the remote VM. Microsoft documents this limitation in [New VDI solution for Teams](https://learn.microsoft.com/en-us/microsoftteams/vdi-2#known-issues): screenshots of Teams content such as incoming screen sharing or video feeds might capture a black square because the content is offloaded to the user's device.
+
+## Example
+
+FloatShot can capture the locally rendered remote meeting view while the remote desktop session is full screen.
+
+![FloatShot capturing a remote meeting from the local endpoint](docs/images/devbox-teams-floatshot-example.png)
+
+## Why Use It
+
+- Teams runs inside your Dev Box, but normal screenshots from the Dev Box show blank/black/white meeting content.
+- You need a small screenshot button that still appears while Windows App is full screen.
+- You want a quick PixPin-like flow: select, mark, pin, copy, or save.
+
+## Features
 
 - Shows a draggable floating screenshot button on the local desktop.
 - Stays visible over Windows App / Dev Box full-screen sessions by using a layered topmost tool window.
@@ -16,14 +30,12 @@ That means a screenshot tool running inside the Dev Box can capture only what th
 - Supports pinned screenshots that can be moved, zoomed, copied, saved, or closed.
 - Saves screenshots to a configurable folder and can optionally copy captures to the clipboard.
 
-## Best Fit Scenarios
+## Best For
 
-- Capturing Teams meeting content while Teams runs inside a Windows App / Dev Box session and normal in-VM screenshots produce blank, black, or white results.
-- Capturing incoming Teams screen sharing or video content that is rendered through Teams VDI optimization on the local endpoint.
-- Taking screenshots while working inside a full-screen Dev Box, Cloud PC, or Azure Virtual Desktop session.
-- Keeping a small screenshot button available without leaving the remote session or switching away from Windows App.
-- Quickly marking a selected area with a rectangle or pen before copying or saving.
-- Pinning a temporary reference screenshot while comparing information across windows.
+- Windows App + Dev Box / Cloud PC / Azure Virtual Desktop.
+- Teams meetings running inside the remote session.
+- Full-screen remote work where local screenshot controls are hard to reach.
+- Quick annotation and pinned reference screenshots.
 
 FloatShot is intentionally small. It is not trying to replace full annotation suites; it focuses on the common PixPin-like flow of select, mark, pin, copy, or save.
 
@@ -36,7 +48,7 @@ FloatShot is intentionally small. It is not trying to replace full annotation su
 
 ## Related Microsoft Documentation
 
-- [New VDI solution for Teams](https://learn.microsoft.com/en-us/microsoftteams/vdi-2) explains the SlimCore-based Teams VDI architecture, including the endpoint-side `MsTeamsVdi.exe` media engine and the known screenshot limitation for offloaded Teams content.
+- [New VDI solution for Teams](https://learn.microsoft.com/en-us/microsoftteams/vdi-2) explains the Teams VDI architecture and the known screenshot limitation for offloaded Teams content.
 - [Use Microsoft Teams on Azure Virtual Desktop](https://learn.microsoft.com/en-us/azure/virtual-desktop/teams-on-avd) describes Teams media optimization with Windows App / Remote Desktop clients and how to verify whether Teams is optimized.
 - [AVD Screen Capture Protection](https://learn.microsoft.com/en-us/azure/virtual-desktop/screen-capture-protection) documents policy-based screen capture blocking for remote desktop clients.
 
@@ -63,7 +75,15 @@ Install [Inno Setup](https://jrsoftware.org/isinfo.php), then run:
 .\build\package-installer.ps1
 ```
 
-The installer will be written to `installer\Output\FloatShotSetup-0.2.2.exe`.
+The installer will be written to `installer\Output\FloatShotSetup-0.2.3.exe`.
+
+## Troubleshooting
+
+### Setup is stuck at `Closing applications...`
+
+This was a known issue in the old `0.2.0` installer when FloatShot was already running.
+
+Use the latest installer, or exit FloatShot from the tray menu before installing. Starting with `0.2.2`, the installer stops the running FloatShot process before copying files, so this screen should not hang.
 
 ## Usage
 
