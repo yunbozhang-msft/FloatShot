@@ -11,7 +11,7 @@ dotnet build -c Release
 dotnet publish -c Release -o ..\..\publish
 ```
 
-Expected result: build and publish succeed. The current known warning is `WFAC010` for high DPI settings in the app manifest.
+Expected result: build and publish succeed with no warnings or errors.
 
 ## Installer Checks
 
@@ -19,12 +19,13 @@ Expected result: build and publish succeed. The current known warning is `WFAC01
 .\build\package-installer.ps1
 ```
 
-Expected result: `installer\Output\FloatShotSetup-0.1.0.exe` is created.
+Expected result: `installer\Output\FloatShotSetup-<version>.exe` is created.
 
 Manual install validation:
 
 - Install FloatShot for the current user.
 - Confirm Start Menu shortcut is created.
+- Confirm `Launch FloatShot` is checked by default on the installer finish page.
 - Launch FloatShot from the installer finish page and from Start Menu.
 - Uninstall from Windows Settings and confirm the app files are removed.
 

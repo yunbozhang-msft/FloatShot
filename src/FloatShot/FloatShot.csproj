@@ -9,9 +9,9 @@
     <RootNamespace>FloatShot</RootNamespace>
     <AssemblyName>FloatShot</AssemblyName>
     <ApplicationIcon>Resources\floatshot.ico</ApplicationIcon>
-    <Version>0.2.3</Version>
-    <FileVersion>0.2.3</FileVersion>
-    <AssemblyVersion>0.2.3</AssemblyVersion>
+    <Version>0.2.4</Version>
+    <FileVersion>0.2.4</FileVersion>
+    <AssemblyVersion>0.2.4</AssemblyVersion>
     <Company>FloatShot</Company>
     <Product>FloatShot</Product>
     <Description>Floating screenshot button visible across virtual desktops and remote desktop sessions.</Description>
@@ -21,15 +21,13 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)'=='Release'">
-    <PublishSingleFile>true</PublishSingleFile>
+    <PublishSingleFile>false</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <!-- Compression: ~50% smaller exe, ~200ms slower cold start (acceptable for tray app) -->
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
     <DebugType>embedded</DebugType>
-    <!-- Disable ReadyToRun (saves ~30% size; cold start cost minor for tray app) -->
-    <PublishReadyToRun>false</PublishReadyToRun>
+    <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>

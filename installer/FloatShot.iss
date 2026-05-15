@@ -1,5 +1,5 @@
 #define MyAppName "FloatShot"
-#define MyAppVersion "0.2.3"
+#define MyAppVersion "0.2.4"
 #define MyAppPublisher "FloatShot"
 #define MyAppExeName "FloatShot.exe"
 
@@ -13,8 +13,8 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=Output
 OutputBaseFilename=FloatShotSetup-{#MyAppVersion}
-Compression=lzma2
-SolidCompression=yes
+Compression=zip
+SolidCompression=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
@@ -29,10 +29,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
-Name: "launch"; Description: "Launch FloatShot after setup"; GroupDescription: "After installation:"; Flags: checkedonce
 
 [Files]
-Source: "..\publish\FloatShot.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\FloatShot"; Filename: "{app}\{#MyAppExeName}"
@@ -40,7 +39,7 @@ Name: "{group}\Uninstall FloatShot"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\FloatShot"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch FloatShot"; Flags: nowait postinstall skipifsilent; Tasks: launch
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch FloatShot"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 Filename: "taskkill"; Parameters: "/IM FloatShot.exe /F"; Flags: runhidden; RunOnceId: "StopFloatShot"

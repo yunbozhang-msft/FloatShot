@@ -79,7 +79,7 @@ Install [Inno Setup](https://jrsoftware.org/isinfo.php), then run:
 .\build\package-installer.ps1
 ```
 
-The installer will be written to `installer\Output\FloatShotSetup-0.2.3.exe`.
+The installer will be written to `installer\Output\FloatShotSetup-0.2.4.exe`.
 
 ## Troubleshooting
 

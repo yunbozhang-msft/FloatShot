@@ -12,6 +12,10 @@ $project = Join-Path $root 'src\FloatShot\FloatShot.csproj'
 $publishDir = Join-Path $root 'publish'
 $installerScript = Join-Path $root 'installer\FloatShot.iss'
 
+if (Test-Path $publishDir) {
+    Remove-Item $publishDir -Recurse -Force
+}
+
 Write-Host "Publishing FloatShot..."
 dotnet publish $project -c $Configuration -r $Runtime -o $publishDir
 

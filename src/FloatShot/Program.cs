@@ -17,8 +17,8 @@ internal static class Program
             return;
         }
 
-        ApplicationConfiguration.Initialize();
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        ApplicationConfiguration.Initialize();
 
         using var ctx = new TrayContext();
         Application.Run(ctx);
