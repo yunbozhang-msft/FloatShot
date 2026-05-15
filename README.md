@@ -10,7 +10,11 @@ This is useful because optimized Teams VDI media can be rendered on the local en
 
 ## Example
 
-FloatShot can capture the locally rendered remote meeting view while the remote desktop session is full screen.
+In an optimized Teams VDI session, an in-session screenshot can show the meeting content as blank or black even though the meeting is visible on your local screen.
+
+![Optimized Teams VDI session where meeting content appears blank or black in a screenshot](docs/images/teams-vdi-optimized-blank-example.png)
+
+FloatShot runs on the local endpoint instead, so it can capture the locally rendered remote meeting view while the remote desktop session is full screen.
 
 ![FloatShot capturing a remote meeting from the local endpoint](docs/images/devbox-teams-floatshot-example.png)
 
