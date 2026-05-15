@@ -6,3 +6,4 @@ installer/Output/
 *.user
 *.suo
 *.log
+LOCAL_CONTEXT.md
