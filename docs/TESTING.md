@@ -36,6 +36,15 @@ Manual install validation:
 - Right-click menu opens Settings and Exit.
 - Hiding the floating button in Settings removes it after saving settings.
 
+## Windows App / Dev Box / Teams VDI Scenario
+
+- Connect to a Dev Box, Cloud PC, or Azure Virtual Desktop session with Windows App.
+- Join a Microsoft Teams meeting inside the remote session.
+- Confirm that a screenshot tool running inside the remote session has trouble capturing optimized Teams meeting content, such as incoming screen sharing or video, when applicable to the environment.
+- Use FloatShot from the local endpoint while Windows App is full screen.
+- Confirm FloatShot can capture the locally presented Windows App pixels for the same area.
+- Confirm this behavior is documented as endpoint/offload-sensitive in Microsoft Teams VDI documentation, and do not treat FloatShot as a bypass for AVD Screen Capture Protection or other enterprise security controls.
+
 ## Capture Modes
 
 - Region capture selects the intended area.
