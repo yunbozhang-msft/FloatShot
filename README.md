@@ -20,7 +20,7 @@ FloatShot runs on the **local endpoint** instead, above the full-screen Windows 
 
 **FloatShot result:** the locally rendered remote meeting view is captured.
 
-![FloatShot capturing a remote meeting from the local endpoint](docs/images/devbox-teams-floatshot-example.png)
+![FloatShot capturing a remote meeting from the local endpoint](docs/images/devbox-teams-floatshot-result-20260515.png)
 
 ## Why Use It
 
