@@ -8,13 +8,17 @@ FloatShot runs on your **local Windows PC**, floats above the full-screen Window
 
 This is useful because optimized Teams VDI media can be rendered on the local endpoint instead of fully inside the remote VM. Microsoft documents this limitation in [New VDI solution for Teams](https://learn.microsoft.com/en-us/microsoftteams/vdi-2#known-issues): screenshots of Teams content such as incoming screen sharing or video feeds might capture a black square because the content is offloaded to the user's device.
 
-## Example
+## Example: Normal Screenshot Tool vs FloatShot
 
-In an optimized Teams VDI session, an in-session screenshot can show the meeting content as blank or black even though the meeting is visible on your local screen.
+In an optimized Teams VDI session, a normal screenshot tool running **inside the remote desktop** can show the meeting content as blank or black even though the meeting is visible on your local screen.
+
+**Normal in-session screenshot result:** Teams content is missing or black.
 
 ![Optimized Teams VDI session where meeting content appears blank or black in a screenshot](docs/images/teams-vdi-optimized-blank-example.png)
 
-FloatShot runs on the local endpoint instead, so it can capture the locally rendered remote meeting view while the remote desktop session is full screen.
+FloatShot runs on the **local endpoint** instead, above the full-screen Windows App session.
+
+**FloatShot result:** the locally rendered remote meeting view is captured.
 
 ![FloatShot capturing a remote meeting from the local endpoint](docs/images/devbox-teams-floatshot-example.png)
 
