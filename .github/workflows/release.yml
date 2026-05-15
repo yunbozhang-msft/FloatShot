@@ -17,10 +17,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
+      - name: Show .NET SDK
+        run: dotnet --info
 
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
