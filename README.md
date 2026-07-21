@@ -4,9 +4,35 @@ FloatShot fixes one annoying screenshot problem:
 
 > You are using **Windows App** to connect to a **Dev Box / Cloud PC / Azure Virtual Desktop**, and you join a **Microsoft Teams meeting inside the remote desktop**. When you take a screenshot inside the remote session, Teams meeting content may come out blank, black, or white.
 
-FloatShot runs on your **local Windows PC**, floats above the full-screen Windows App session, and captures what is actually shown on your local screen.
+FloatShot must be installed and run on your **local Windows PC**, the same PC where you open **Windows App**. Do not install it only inside the remote Dev Box, Cloud PC, or Azure Virtual Desktop. FloatShot floats above the full-screen Windows App window and captures the pixels shown on your local monitor.
 
-This is useful because optimized Teams VDI media can be rendered on the local endpoint instead of fully inside the remote VM. Microsoft documents this limitation in [New VDI solution for Teams](https://learn.microsoft.com/en-us/microsoftteams/vdi-2#known-issues): screenshots of Teams content such as incoming screen sharing or video feeds might capture a black square because the content is offloaded to the user's device.
+## Where to Install FloatShot
+
+If you sit at **PC A** and use Windows App to connect to **Dev Box B**, install FloatShot on **PC A**.
+
+```mermaid
+flowchart LR
+	subgraph Local["PC A: Your local Windows PC"]
+		FloatShot["FloatShot<br/>INSTALL HERE"]
+		WindowsApp["Windows App"]
+	end
+
+	subgraph Remote["PC B: Remote Dev Box / Cloud PC / AVD"]
+		Teams["Microsoft Teams"]
+	end
+
+	WindowsApp -->|"Connects to"| Teams
+```
+
+**Correct:** Install FloatShot on the physical/local PC in front of you, alongside Windows App.
+
+**Incorrect:** Install FloatShot only inside the Dev Box and expect it to capture Teams media rendered on the local PC.
+
+## Why This Works
+
+With Teams VDI optimization, Teams runs inside the remote desktop, but some meeting media can be rendered on your local PC. A screenshot tool running inside the remote desktop may not be able to capture those locally rendered pixels, which is why shared content or video can appear black, white, or blank in its screenshots.
+
+FloatShot runs outside the remote desktop on your local PC, so it captures the final image displayed on your local monitor. Microsoft documents the underlying Teams VDI screenshot limitation in [New VDI solution for Teams](https://learn.microsoft.com/en-us/microsoftteams/vdi-2#known-issues).
 
 ## Example: Normal Screenshot Tool vs FloatShot
 
@@ -16,11 +42,11 @@ In an optimized Teams VDI session, a normal screenshot tool running **inside the
 
 ![Optimized Teams VDI session where meeting content appears blank or black in a screenshot](docs/images/teams-vdi-optimized-blank-example.png)
 
-FloatShot runs on the **local endpoint** instead, above the full-screen Windows App session.
+FloatShot runs on the **local Windows PC** instead, above the full-screen Windows App window.
 
 **FloatShot result:** the locally rendered remote meeting view is captured.
 
-![FloatShot capturing a remote meeting from the local endpoint](docs/images/devbox-teams-floatshot-result-20260515.png)
+![FloatShot capturing a remote meeting from the local Windows PC](docs/images/devbox-teams-floatshot-result-20260515.png)
 
 ## Why Use It
 
@@ -31,7 +57,7 @@ FloatShot runs on the **local endpoint** instead, above the full-screen Windows 
 ## Features
 
 - Shows a draggable floating screenshot button on the local desktop.
-- Stays visible over Windows App / Dev Box full-screen sessions by using a layered topmost tool window.
+- Stays visible above a full-screen Windows App window by using a layered topmost tool window on the local PC.
 - Captures a selected region, all monitors, the primary screen, or the active window.
 - Lets you adjust the selected region before confirming.
 - Provides region toolbar actions for rectangle mark, pen mark, pin, copy, save, and cancel.
