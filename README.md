@@ -22,6 +22,9 @@ flowchart LR
 	end
 
 	WindowsApp -->|"Connects to"| Teams
+
+	classDef install fill:#2da44e,color:#ffffff,stroke:#1a7f37,stroke-width:3px
+	class FloatShot install
 ```
 
 **Correct:** Install FloatShot on the physical/local PC in front of you, alongside Windows App.
