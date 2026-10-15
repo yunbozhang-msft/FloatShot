@@ -158,6 +158,7 @@ internal sealed class TrayContext : ApplicationContext
                 // Region 模式选了 Pin/Copy/Cancel, 或非 Region 模式被取消 - 不弹气泡
                 return;
             }
+            _settings.Save();
             ShowBalloon("Screenshot saved", path, ToolTipIcon.Info);
         }
         catch (Exception ex)

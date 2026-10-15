@@ -7,3 +7,5 @@ installer/Output/
 *.suo
 *.log
 LOCAL_CONTEXT.md
+temp/
+docs/presentation/

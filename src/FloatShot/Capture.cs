@@ -66,10 +66,31 @@ internal static class Capture
     {
         try
         {
-            Directory.CreateDirectory(settings.SaveFolder);
-            var fileName = string.Format(settings.FileNamePattern, DateTime.Now);
-            var fullPath = Path.Combine(settings.SaveFolder, fileName);
+            var initialFolder = Directory.Exists(settings.SaveFolder)
+                ? settings.SaveFolder
+                : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+            using var dialog = new SaveFileDialog
+            {
+                Title = "Save screenshot as",
+                Filter = "PNG image (*.png)|*.png",
+                DefaultExt = "png",
+                AddExtension = true,
+                OverwritePrompt = true,
+                CheckPathExists = true,
+                RestoreDirectory = true,
+                InitialDirectory = initialFolder,
+                FileName = GetAvailableFileName(initialFolder, string.Format(settings.FileNamePattern, DateTime.Now))
+            };
+            if (dialog.ShowDialog() != DialogResult.OK) return null;
+
+            var fullPath = dialog.FileName;
             bmp.Save(fullPath, ImageFormat.Png);
+
+            var saveFolder = Path.GetDirectoryName(fullPath)!;
+            if (!string.Equals(settings.SaveFolder, saveFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                settings.SaveFolder = saveFolder;
+            }
 
             if (copyToClipboard)
                 try { Clipboard.SetImage(bmp); } catch { }
@@ -83,6 +104,16 @@ internal static class Capture
         {
             if (ownsBmp) bmp.Dispose();
         }
+    }
+
+    internal static string GetAvailableFileName(string folder, string fileName)
+    {
+        var candidate = fileName;
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        var extension = Path.GetExtension(fileName);
+        for (int suffix = 1; File.Exists(Path.Combine(folder, candidate)) || Directory.Exists(Path.Combine(folder, candidate)); suffix++)
+            candidate = $"{stem}_{suffix}{extension}";
+        return candidate;
     }
 
     private static Bitmap CaptureBounds(Rectangle bounds)

@@ -37,7 +37,7 @@ With Teams VDI optimization, Teams runs inside the remote desktop, but some meet
 
 FloatShot runs outside the remote desktop on your local PC, so it captures the final image displayed on your local monitor. Microsoft documents the underlying Teams VDI screenshot limitation in [New VDI solution for Teams](https://learn.microsoft.com/en-us/microsoftteams/vdi-2#known-issues).
 
-## Example: Normal Screenshot Tool vs FloatShot
+## Screenshot Behavior
 
 In an optimized Teams VDI session, a normal screenshot tool running **inside the remote desktop** can show the meeting content as blank or black even though the meeting is visible on your local screen.
 
@@ -47,9 +47,7 @@ In an optimized Teams VDI session, a normal screenshot tool running **inside the
 
 FloatShot runs on the **local Windows PC** instead, above the full-screen Windows App window.
 
-**FloatShot result:** the locally rendered remote meeting view is captured.
-
-![FloatShot capturing a remote meeting from the local Windows PC](docs/images/devbox-teams-floatshot-result-20260515.png)
+FloatShot captures the locally rendered remote meeting view. Repository screenshots should use synthetic demo content rather than real workplace or customer information.
 
 ## Why Use It
 
@@ -112,7 +110,7 @@ Install [Inno Setup](https://jrsoftware.org/isinfo.php), then run:
 .\build\package-installer.ps1
 ```
 
-The installer will be written to `installer\Output\FloatShotSetup-0.2.4.exe`.
+The installer will be written to `installer\Output\FloatShotSetup-0.2.5.exe`.
 
 ## Troubleshooting
 
@@ -129,6 +127,9 @@ Use the latest installer, or exit FloatShot from the tray menu before installing
 - Use Settings to change save folder, default mode, hotkeys, clipboard behavior, floating button visibility, and startup behavior.
 - In region capture mode, drag to select an area, then resize or move the selection before choosing an action.
 - Use the toolbar to mark, draw, pin, copy, save, or cancel.
+- Hover over a toolbar button to see its name and shortcut.
+- Save opens a Save As dialog to choose the folder and filename. Successful captures remember the selected folder; cancelling does not save or copy the image.
+- Default screenshot names include date, time, and milliseconds, such as `screenshot_20261015_130405_123.png`. Existing suggested names receive a numeric suffix; manually choosing an existing file still requires overwrite confirmation.
 
 ## Testing
 

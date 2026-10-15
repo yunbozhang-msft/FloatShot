@@ -279,10 +279,15 @@ internal sealed class PinnedImage : Form
 
     private void SaveAs()
     {
+        var settings = Settings.Load();
+        var folder = Directory.Exists(settings.SaveFolder)
+            ? settings.SaveFolder
+            : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
         using var dlg = new SaveFileDialog
         {
             Filter = "PNG image (*.png)|*.png|JPEG image (*.jpg)|*.jpg|Bitmap (*.bmp)|*.bmp",
-            FileName = $"shot_{DateTime.Now:yyyyMMdd_HHmmss}.png"
+            InitialDirectory = folder,
+            FileName = FloatShot.Capture.GetAvailableFileName(folder, $"screenshot_{DateTime.Now:yyyyMMdd_HHmmss_fff}.png")
         };
         if (dlg.ShowDialog(this) == DialogResult.OK)
         {

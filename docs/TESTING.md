@@ -13,6 +13,16 @@ dotnet publish -c Release -o ..\..\publish
 
 Expected result: build and publish succeed with no warnings or errors.
 
+## Release Privacy Checks
+
+- Review `git status --short --untracked-files=all` before committing.
+- Keep temporary presentations, recordings, prototypes, local settings, and build caches out of Git.
+- Check source and documentation for credentials, internal endpoints, company email addresses, customer data, and personal absolute paths.
+- Use synthetic content for example screenshots; do not rely on blurring real workplace or customer information.
+- Release binaries must not embed debug symbols or ship application PDB files that expose local source paths.
+- Package only the publish output, not a workspace archive or local temporary files.
+- Removing a sensitive file from the current tree does not remove it from Git history or older release assets; review those separately when necessary.
+
 ## Installer Checks
 
 ```powershell
@@ -54,15 +64,23 @@ Manual install validation:
 - Full screen captures all monitors.
 - Primary screen captures the primary monitor.
 - Active window captures the foreground window.
+- Non-region captures open Save As after taking the snapshot, so the dialog is not included in the image.
 
 ## Region Toolbar
 
+- Hovering over each button shows its name and shortcut after a short delay; moving away or clicking hides the hint.
+- Toolbar and hints remain on the selected monitor, including selections near its bottom edge.
 - Rectangle mark draws an outline without a filled center.
 - Pen mark draws freehand strokes.
 - `Ctrl+Z` undoes the most recent annotation.
 - Pin creates a floating pinned image with annotations included.
 - Copy places the annotated image on the clipboard.
-- Save writes the annotated image to the configured folder.
+- Save opens Save As with a suggested filename containing date, hours, minutes, seconds, and milliseconds.
+- The configured folder, or the last successfully selected folder, is used as the initial save location.
+- Existing suggested filenames receive `_1`, `_2`, and subsequent suffixes instead of being offered again.
+- Choosing another filename or folder saves a valid annotated PNG at that location.
+- Manually selecting an existing filename asks for overwrite confirmation; declining preserves the existing file.
+- Cancelling Save As writes no image, changes no clipboard content or remembered folder, and creates no directory.
 - Cancel closes the overlay without saving.
 
 ## Pinned Images
@@ -71,6 +89,7 @@ Manual install validation:
 - Mouse wheel zooms in and out.
 - Double-click closes the pinned image.
 - Right-click Copy, Save, Reset zoom, and Close work.
+- Save As suggests a timestamped filename with milliseconds and avoids names already present in its initial folder.
 
 ## Settings
 

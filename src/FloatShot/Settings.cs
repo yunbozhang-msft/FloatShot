@@ -5,10 +5,17 @@ namespace FloatShot;
 
 internal sealed class Settings
 {
+    private const string DefaultFileNamePattern = "screenshot_{0:yyyyMMdd_HHmmss_fff}.png";
+    private string _fileNamePattern = DefaultFileNamePattern;
+
     public string SaveFolder { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Screenshots");
 
-    public string FileNamePattern { get; set; } = "shot_{0:yyyyMMdd_HHmmss_fff}.png";
+    public string FileNamePattern
+    {
+        get => _fileNamePattern;
+        set => _fileNamePattern = value == "shot_{0:yyyyMMdd_HHmmss_fff}.png" ? DefaultFileNamePattern : value;
+    }
 
     public CaptureMode DefaultMode { get; set; } = CaptureMode.Region;
 

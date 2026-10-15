@@ -85,6 +85,9 @@ internal static class RegionCapture
         private readonly List<RectangleF> _marks = new();        // overlay-local coordinates
         private readonly List<List<PointF>> _strokes = new();    // overlay-local coordinates
         private List<ToolButton> _buttons = new();
+        private readonly System.Windows.Forms.Timer _toolTipTimer = new() { Interval = 300 };
+        private ToolButton? _hoveredButton;
+        private string? _toolTipText;
 
         public Rectangle SelectedScreenRect { get; private set; }
         public RegionAction Action { get; private set; } = RegionAction.Cancel;
@@ -103,6 +106,16 @@ internal static class RegionCapture
             KeyPreview      = true;
             BackColor       = Color.Black;
             Icon            = AppIcon.Get();
+            _toolTipTimer.Tick += (_, _) => ShowToolTip();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _toolTipTimer.Dispose();
+            }
+            base.Dispose(disposing);
         }
 
         protected override CreateParams CreateParams
@@ -199,7 +212,11 @@ internal static class RegionCapture
                 g.DrawString(label, fnt, Brushes.White, lx + padX, ly + padY);
             }
 
-            if (_selected) DrawToolbar(g);
+            if (_selected)
+            {
+                DrawToolbar(g);
+                DrawToolTip(g);
+            }
             else if (_dragMode == SelectionDragMode.None && _sel.Width == 0) DrawCenterHint(g);
         }
 
@@ -227,19 +244,19 @@ internal static class RegionCapture
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
-            const int btnSize = 48, gap = 4, pad = 8;
-            int barW = (btnSize * _buttons.Count) + (gap * (_buttons.Count - 1)) + pad * 2;
+            const int btnSize = 48, gap = 4, pad = 8, separatorGap = 12;
+            int barW = (btnSize * _buttons.Count) + (gap * (_buttons.Count - 1)) + pad * 2 + separatorGap;
             int barH = btnSize + pad * 2;
+            var monitor = RectangleToClient(Screen.FromPoint(PointToScreen(new Point(_sel.Right - 1, _sel.Bottom - 1))).Bounds);
 
             // Default: right-bottom of selection, with auto-fallback when off-screen.
             int bx = _sel.Right - barW;            // align right edge
             int by = _sel.Bottom + 8;              // below selection
             // Fallback chain when no room below or off the right edge
-            if (by + barH > _virt.Height) by = _sel.Top - barH - 8;
-            if (by < 0)                   by = Math.Min(_sel.Bottom - barH - 8, _virt.Height - barH - 8);  // inside selection bottom
-            if (by < 0)                   by = 8;
-            if (bx + barW > _virt.Width)  bx = _virt.Width - barW - 8;
-            if (bx < 0)                   bx = 8;
+            if (by + barH > monitor.Bottom) by = _sel.Top - barH - 8;
+            if (by < monitor.Top) by = Math.Min(_sel.Bottom - barH - 8, monitor.Bottom - barH - 8);
+            by = Math.Clamp(by, monitor.Top + 8, Math.Max(monitor.Top + 8, monitor.Bottom - barH - 8));
+            bx = Math.Clamp(bx, monitor.Left + 8, Math.Max(monitor.Left + 8, monitor.Right - barW - 8));
 
             var barRect = new Rectangle(bx, by, barW, barH);
 
@@ -264,6 +281,13 @@ internal static class RegionCapture
             int y = by + pad;
             for (int i = 0; i < _buttons.Count; i++)
             {
+                if (i == 2)
+                {
+                    using var separator = new Pen(Color.FromArgb(35, 0, 0, 0));
+                    g.DrawLine(separator, x + separatorGap / 2 - gap / 2, y + 10,
+                        x + separatorGap / 2 - gap / 2, y + btnSize - 10);
+                    x += separatorGap;
+                }
                 var b = _buttons[i];
                 b.Bounds = new Rectangle(x, y, btnSize, btnSize);
 
@@ -300,6 +324,7 @@ internal static class RegionCapture
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
+            ResetToolTip();
             if (_selected)
             {
                 if (e.Button == MouseButtons.Left)
@@ -403,6 +428,13 @@ internal static class RegionCapture
                     var hover = b.Bounds.Contains(e.Location);
                     if (hover != b.Hovered) { b.Hovered = hover; changed = true; }
                 }
+                var hoveredButton = _buttons.FirstOrDefault(b => b.Hovered);
+                if (hoveredButton != _hoveredButton)
+                {
+                    ResetToolTip();
+                    _hoveredButton = hoveredButton;
+                    if (_hoveredButton is not null) _toolTipTimer.Start();
+                }
                 Cursor = _buttons.Any(b => b.Hovered)
                     ? Cursors.Hand
                     : _editMode == EditMode.None
@@ -419,6 +451,61 @@ internal static class RegionCapture
             var h = Math.Abs(e.Y - _start.Y);
             _sel = new Rectangle(x, y, w, h);
             Invalidate();
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            ResetToolTip();
+            foreach (var button in _buttons) button.Hovered = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        private void ResetToolTip()
+        {
+            _toolTipTimer.Stop();
+            if (_toolTipText is not null) Invalidate();
+            _toolTipText = null;
+            _hoveredButton = null;
+        }
+
+        private void ShowToolTip()
+        {
+            _toolTipTimer.Stop();
+            if (_hoveredButton is not { } button || !button.Bounds.Contains(PointToClient(MousePosition))) return;
+
+            _toolTipText = button.Tool switch
+            {
+                RegionTool.RectangleMark => "Rectangle mark (M)",
+                RegionTool.Pen => "Freehand pen (B)",
+                RegionTool.Pin => "Pin to screen (P)",
+                RegionTool.Copy => "Copy to clipboard (C)",
+                RegionTool.Save => "Save as... (S / Enter)",
+                _ => "Cancel capture (Esc)"
+            };
+            Invalidate();
+        }
+
+        private void DrawToolTip(Graphics g)
+        {
+            if (_toolTipText is null || _hoveredButton is not { } button) return;
+            using var font = Fluent.TextFont(9.5f);
+            var size = TextRenderer.MeasureText(g, _toolTipText, font, Size.Empty, TextFormatFlags.NoPadding);
+            var monitor = RectangleToClient(Screen.FromPoint(PointToScreen(button.Bounds.Location)).Bounds);
+            int width = Math.Min(size.Width + 24, monitor.Width);
+            int height = size.Height + 16;
+            int tipX = Math.Clamp(button.Bounds.Left, monitor.Left, monitor.Right - width);
+            int tipY = button.Bounds.Bottom + 6;
+            if (tipY + height > monitor.Bottom) tipY = button.Bounds.Top - height - 6;
+            tipY = Math.Clamp(tipY, monitor.Top, Math.Max(monitor.Top, monitor.Bottom - height));
+            var bounds = new Rectangle(tipX, tipY, width, height);
+            using var background = new SolidBrush(Color.FromArgb(32, 32, 32));
+            using var border = new Pen(Color.FromArgb(85, 85, 85));
+            using var path = RoundedRect(bounds, Fluent.RadiusSmall);
+            g.FillPath(background, path);
+            g.DrawPath(border, path);
+            TextRenderer.DrawText(g, _toolTipText, font, bounds, Color.White,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
@@ -460,6 +547,7 @@ internal static class RegionCapture
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
+            ResetToolTip();
             if (e.KeyCode == Keys.Escape)
             {
                 DialogResult = DialogResult.Cancel;

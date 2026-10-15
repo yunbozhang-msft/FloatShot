@@ -9,9 +9,9 @@
     <RootNamespace>FloatShot</RootNamespace>
     <AssemblyName>FloatShot</AssemblyName>
     <ApplicationIcon>Resources\floatshot.ico</ApplicationIcon>
-    <Version>0.2.4</Version>
-    <FileVersion>0.2.4</FileVersion>
-    <AssemblyVersion>0.2.4</AssemblyVersion>
+    <Version>0.2.5</Version>
+    <FileVersion>0.2.5</FileVersion>
+    <AssemblyVersion>0.2.5</AssemblyVersion>
     <Company>FloatShot</Company>
     <Product>FloatShot</Product>
     <Description>Floating screenshot button visible across virtual desktops and remote desktop sessions.</Description>
@@ -26,7 +26,8 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
     <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
-    <DebugType>embedded</DebugType>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
     <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
 
