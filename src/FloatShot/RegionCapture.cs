@@ -6,9 +6,9 @@ using System.Windows.Forms;
 
 namespace FloatShot;
 
-internal enum RegionAction { Cancel, Save, Copy, Pin }
+internal enum RegionAction { Cancel, Save, Copy, Pin, SaveAs }
 
-internal enum RegionTool { RectangleMark, Pen, Pin, Copy, Save, Cancel }
+internal enum RegionTool { RectangleMark, Pen, Pin, Copy, Save, Cancel, SaveOptions }
 
 internal enum EditMode { None, RectangleMark, Pen }
 
@@ -32,7 +32,7 @@ internal static class RegionCapture
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
 
-    public static RegionResult? Pick()
+    public static RegionResult? Pick(string? saveFolder = null)
     {
         // Snapshot the whole virtual screen BEFORE showing the overlay so we
         // get the real underlying content (devbox / w365 projection too).
@@ -49,7 +49,7 @@ internal static class RegionCapture
 
         try
         {
-            using var f = new OverlayForm(snapshot, virt);
+            using var f = new OverlayForm(snapshot, virt, saveFolder);
             var dr = f.ShowDialog();
             if (dr != DialogResult.OK || f.Action == RegionAction.Cancel) return null;
 
@@ -71,6 +71,7 @@ internal static class RegionCapture
     {
         private readonly Bitmap _snapshot;
         private readonly Rectangle _virt;
+        private readonly string _saveFolder;
         private Point _start;
         private Rectangle _sel;            // overlay-local coordinates
         private SelectionDragMode _dragMode;
@@ -88,14 +89,16 @@ internal static class RegionCapture
         private readonly System.Windows.Forms.Timer _toolTipTimer = new() { Interval = 300 };
         private ToolButton? _hoveredButton;
         private string? _toolTipText;
+        private ContextMenuStrip? _saveMenu;
 
         public Rectangle SelectedScreenRect { get; private set; }
         public RegionAction Action { get; private set; } = RegionAction.Cancel;
 
-        public OverlayForm(Bitmap snapshot, Rectangle virt)
+        public OverlayForm(Bitmap snapshot, Rectangle virt, string? saveFolder = null)
         {
             _snapshot = snapshot;
             _virt = virt;
+            _saveFolder = saveFolder ?? new Settings().SaveFolder;
             FormBorderStyle = FormBorderStyle.None;
             StartPosition   = FormStartPosition.Manual;
             Bounds          = virt;
@@ -114,6 +117,7 @@ internal static class RegionCapture
             if (disposing)
             {
                 _toolTipTimer.Dispose();
+                _saveMenu?.Dispose();
             }
             base.Dispose(disposing);
         }
@@ -244,8 +248,9 @@ internal static class RegionCapture
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
-            const int btnSize = 48, gap = 4, pad = 8, separatorGap = 12;
-            int barW = (btnSize * _buttons.Count) + (gap * (_buttons.Count - 1)) + pad * 2 + separatorGap;
+            const int btnSize = 48, optionsWidth = 24, gap = 4, pad = 8, separatorGap = 12;
+            int barW = _buttons.Sum(button => button.Tool == RegionTool.SaveOptions ? optionsWidth : btnSize)
+                + (gap * (_buttons.Count - 1)) + pad * 2 + separatorGap;
             int barH = btnSize + pad * 2;
             var monitor = RectangleToClient(Screen.FromPoint(PointToScreen(new Point(_sel.Right - 1, _sel.Bottom - 1))).Bounds);
 
@@ -289,7 +294,8 @@ internal static class RegionCapture
                     x += separatorGap;
                 }
                 var b = _buttons[i];
-                b.Bounds = new Rectangle(x, y, btnSize, btnSize);
+                int buttonWidth = b.Tool == RegionTool.SaveOptions ? optionsWidth : btnSize;
+                b.Bounds = new Rectangle(x, y, buttonWidth, btnSize);
 
                 bool activeTool = (b.Tool == RegionTool.RectangleMark && _editMode == EditMode.RectangleMark)
                     || (b.Tool == RegionTool.Pen && _editMode == EditMode.Pen);
@@ -318,7 +324,7 @@ internal static class RegionCapture
 
                 DrawToolIcon(g, b, iconColor);
 
-                x += btnSize + gap;
+                x += buttonWidth + gap;
             }
         }
 
@@ -370,6 +376,11 @@ internal static class RegionCapture
                 }
                 else if (e.Button == MouseButtons.Right)
                 {
+                    if (_buttons.Any(button => button.Tool is RegionTool.Save or RegionTool.SaveOptions && button.Bounds.Contains(e.Location)))
+                    {
+                        ShowSaveMenu();
+                        return;
+                    }
                     DialogResult = DialogResult.Cancel;
                     Close();
                 }
@@ -480,7 +491,8 @@ internal static class RegionCapture
                 RegionTool.Pen => "Freehand pen (B)",
                 RegionTool.Pin => "Pin to screen (P)",
                 RegionTool.Copy => "Copy to clipboard (C)",
-                RegionTool.Save => "Save as... (S / Enter)",
+                RegionTool.Save => $"Save to {_saveFolder}\nS / Enter",
+                RegionTool.SaveOptions => "Save options / Save as...",
                 _ => "Cancel capture (Esc)"
             };
             Invalidate();
@@ -490,8 +502,10 @@ internal static class RegionCapture
         {
             if (_toolTipText is null || _hoveredButton is not { } button) return;
             using var font = Fluent.TextFont(9.5f);
-            var size = TextRenderer.MeasureText(g, _toolTipText, font, Size.Empty, TextFormatFlags.NoPadding);
             var monitor = RectangleToClient(Screen.FromPoint(PointToScreen(button.Bounds.Location)).Bounds);
+            var textFlags = TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
+            var size = TextRenderer.MeasureText(g, _toolTipText, font,
+                new Size(Math.Max(1, Math.Min(420, monitor.Width - 24)), int.MaxValue), textFlags);
             int width = Math.Min(size.Width + 24, monitor.Width);
             int height = size.Height + 16;
             int tipX = Math.Clamp(button.Bounds.Left, monitor.Left, monitor.Right - width);
@@ -504,8 +518,8 @@ internal static class RegionCapture
             using var path = RoundedRect(bounds, Fluent.RadiusSmall);
             g.FillPath(background, path);
             g.DrawPath(border, path);
-            TextRenderer.DrawText(g, _toolTipText, font, bounds, Color.White,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+            bounds.Inflate(-12, -8);
+            TextRenderer.DrawText(g, _toolTipText, font, bounds, Color.White, textFlags);
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
@@ -555,6 +569,12 @@ internal static class RegionCapture
             }
             else if (_selected)
             {
+                if (e.Control && e.Shift && e.KeyCode == Keys.S)
+                {
+                    Confirm(RegionAction.SaveAs);
+                    e.Handled = true;
+                    return;
+                }
                 if (e.Control && e.KeyCode == Keys.Z)
                 {
                     UndoAnnotation();
@@ -588,7 +608,8 @@ internal static class RegionCapture
                 new() { Tool = RegionTool.Pen,  IconName = FluentIcon.Pen,     AccentColor = Fluent.AccentBlue   },
                 new() { Tool = RegionTool.Pin,  IconName = FluentIcon.Pin,     Action = RegionAction.Pin,    AccentColor = Fluent.AccentPurple },
                 new() { Tool = RegionTool.Copy, IconName = FluentIcon.Copy,    Action = RegionAction.Copy,   AccentColor = Fluent.AccentBlue   },
-                new() { Tool = RegionTool.Save, IconName = FluentIcon.Save,    Action = RegionAction.Save,   AccentColor = Fluent.AccentGreen  },
+                new() { Tool = RegionTool.Save, IconName = FluentIcon.Save,    Action = RegionAction.Save,   AccentColor = Color.FromArgb(60, 60, 60) },
+                new() { Tool = RegionTool.SaveOptions, Action = RegionAction.Save, AccentColor = Color.FromArgb(60, 60, 60) },
                 new() { Tool = RegionTool.Cancel, IconName = FluentIcon.Dismiss, Action = RegionAction.Cancel, AccentColor = Fluent.AccentRed  }
             };
             Cursor = Cursors.Default;
@@ -635,10 +656,45 @@ internal static class RegionCapture
                 case RegionTool.Save:
                     Confirm(RegionAction.Save);
                     break;
+                case RegionTool.SaveOptions:
+                    ShowSaveMenu();
+                    break;
                 case RegionTool.Cancel:
                     Confirm(RegionAction.Cancel);
                     break;
             }
+        }
+
+        private void ShowSaveMenu()
+        {
+            ResetToolTip();
+            if (_saveMenu is null)
+            {
+                _saveMenu = new ContextMenuStrip { ShowItemToolTips = true };
+                _saveMenu.Items.Add(new ToolStripLabel("Save to") { ForeColor = SystemColors.GrayText });
+                _saveMenu.Items.Add(new ToolStripLabel(_saveFolder)
+                {
+                    AutoSize = false,
+                    Size = new Size(360, 24),
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    ToolTipText = _saveFolder
+                });
+                _saveMenu.Items.Add(new ToolStripSeparator());
+                var save = new ToolStripMenuItem("Save", FluentIcon.Get(FluentIcon.Save, 16, Color.FromArgb(60, 60, 60)))
+                {
+                    ShortcutKeyDisplayString = "S / Enter"
+                };
+                save.Click += (_, _) => Confirm(RegionAction.Save);
+                _saveMenu.Items.Add(save);
+                var saveAs = new ToolStripMenuItem("Save as...", FluentIcon.Get(FluentIcon.Folder, 16, Color.FromArgb(60, 60, 60)))
+                {
+                    ShortcutKeyDisplayString = "Ctrl+Shift+S"
+                };
+                saveAs.Click += (_, _) => Confirm(RegionAction.SaveAs);
+                _saveMenu.Items.Add(saveAs);
+            }
+            var anchor = _buttons.First(button => button.Tool == RegionTool.SaveOptions).Bounds;
+            _saveMenu.Show(this, new Point(anchor.Right - _saveMenu.PreferredSize.Width, anchor.Bottom + 4));
         }
 
         private void ToggleEditMode(EditMode mode)
@@ -809,6 +865,13 @@ internal static class RegionCapture
 
         private static void DrawToolIcon(Graphics g, ToolButton b, Color color)
         {
+            if (b.Tool == RegionTool.SaveOptions)
+            {
+                using var font = Fluent.IconFont(10f);
+                TextRenderer.DrawText(g, "\uE70D", font, b.Bounds, color,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                return;
+            }
             if (b.Tool == RegionTool.RectangleMark)
             {
                 var r = Centered(b.Bounds, 24, 18);

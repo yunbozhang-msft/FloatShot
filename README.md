@@ -110,7 +110,7 @@ Install [Inno Setup](https://jrsoftware.org/isinfo.php), then run:
 .\build\package-installer.ps1
 ```
 
-The installer will be written to `installer\Output\FloatShotSetup-0.2.5.exe`.
+The installer will be written to `installer\Output\FloatShotSetup-0.2.6.exe`.
 
 ## Troubleshooting
 
@@ -128,7 +128,7 @@ Use the latest installer, or exit FloatShot from the tray menu before installing
 - In region capture mode, drag to select an area, then resize or move the selection before choosing an action.
 - Use the toolbar to mark, draw, pin, copy, save, or cancel.
 - Hover over a toolbar button to see its name and shortcut.
-- Save opens a Save As dialog to choose the folder and filename. Successful captures remember the selected folder; cancelling does not save or copy the image.
+- Save writes directly to the configured folder without opening a dialog. Hover over Save to see the destination; its small arrow offers Save and Save as. `S` or `Enter` saves directly, while `Ctrl+Shift+S` opens Save As. Successful Save As captures remember the selected folder; cancelling does not save or copy the image.
 - Default screenshot names include date, time, and milliseconds, such as `screenshot_20261015_130405_123.png`. Existing suggested names receive a numeric suffix; manually choosing an existing file still requires overwrite confirmation.
 
 ## Testing

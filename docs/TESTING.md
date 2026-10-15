@@ -64,7 +64,7 @@ Manual install validation:
 - Full screen captures all monitors.
 - Primary screen captures the primary monitor.
 - Active window captures the foreground window.
-- Non-region captures open Save As after taking the snapshot, so the dialog is not included in the image.
+- Non-region captures save directly to the configured folder without opening a dialog.
 
 ## Region Toolbar
 
@@ -75,8 +75,13 @@ Manual install validation:
 - `Ctrl+Z` undoes the most recent annotation.
 - Pin creates a floating pinned image with annotations included.
 - Copy places the annotated image on the clipboard.
-- Save opens Save As with a suggested filename containing date, hours, minutes, seconds, and milliseconds.
-- The configured folder, or the last successfully selected folder, is used as the initial save location.
+- Save remains a neutral icon and writes directly to the configured folder; no Save As dialog appears.
+- With Open folder after capture disabled (the default), quick Save must leave the foreground application unchanged.
+- Hovering over Save shows the configured destination and shortcut.
+- The small Save arrow, or right-clicking Save, opens a menu containing the destination, Save, and Save as.
+- `S` and `Enter` invoke quick Save; `Ctrl+Shift+S` invokes explicit Save As.
+- Save As opens a dialog with a suggested filename containing date, hours, minutes, seconds, and milliseconds.
+- The configured folder, or the last successfully selected folder, is used as the initial Save As location.
 - Existing suggested filenames receive `_1`, `_2`, and subsequent suffixes instead of being offered again.
 - Choosing another filename or folder saves a valid annotated PNG at that location.
 - Manually selecting an existing filename asks for overwrite confirmation; declining preserves the existing file.

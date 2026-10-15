@@ -37,7 +37,7 @@ internal static class Capture
 
     private static string? RunRegion(Settings settings)
     {
-        var result = RegionCapture.Pick();
+        var result = RegionCapture.Pick(settings.SaveFolder);
         if (result is null) return null;
 
         var bmp = result.Image;   // already cropped from the pre-overlay snapshot
@@ -45,7 +45,9 @@ internal static class Capture
         switch (result.Action)
         {
             case RegionAction.Save:
-                return SaveAndPostProcess(bmp, settings, settings.CopyToClipboard, settings.OpenFolderAfterCapture, ownsBmp: true);
+            case RegionAction.SaveAs:
+                return SaveAndPostProcess(bmp, settings, settings.CopyToClipboard, settings.OpenFolderAfterCapture,
+                    ownsBmp: true, saveAs: result.Action == RegionAction.SaveAs);
 
             case RegionAction.Copy:
                 try { Clipboard.SetImage(bmp); } catch { }
@@ -62,29 +64,40 @@ internal static class Capture
         }
     }
 
-    private static string? SaveAndPostProcess(Bitmap bmp, Settings settings, bool copyToClipboard, bool openFolder, bool ownsBmp = false)
+    private static string? SaveAndPostProcess(Bitmap bmp, Settings settings, bool copyToClipboard, bool openFolder, bool ownsBmp = false, bool saveAs = false)
     {
         try
         {
-            var initialFolder = Directory.Exists(settings.SaveFolder)
-                ? settings.SaveFolder
-                : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-            using var dialog = new SaveFileDialog
+            var fileName = string.Format(settings.FileNamePattern, DateTime.Now);
+            string fullPath;
+            if (saveAs)
             {
-                Title = "Save screenshot as",
-                Filter = "PNG image (*.png)|*.png",
-                DefaultExt = "png",
-                AddExtension = true,
-                OverwritePrompt = true,
-                CheckPathExists = true,
-                RestoreDirectory = true,
-                InitialDirectory = initialFolder,
-                FileName = GetAvailableFileName(initialFolder, string.Format(settings.FileNamePattern, DateTime.Now))
-            };
-            if (dialog.ShowDialog() != DialogResult.OK) return null;
-
-            var fullPath = dialog.FileName;
-            bmp.Save(fullPath, ImageFormat.Png);
+                var initialFolder = Directory.Exists(settings.SaveFolder)
+                    ? settings.SaveFolder
+                    : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+                using var dialog = new SaveFileDialog
+                {
+                    Title = "Save screenshot as",
+                    Filter = "PNG image (*.png)|*.png",
+                    DefaultExt = "png",
+                    AddExtension = true,
+                    OverwritePrompt = true,
+                    CheckPathExists = true,
+                    RestoreDirectory = true,
+                    InitialDirectory = initialFolder,
+                    FileName = GetAvailableFileName(initialFolder, fileName)
+                };
+                if (dialog.ShowDialog() != DialogResult.OK) return null;
+                fullPath = dialog.FileName;
+                bmp.Save(fullPath, ImageFormat.Png);
+            }
+            else
+            {
+                Directory.CreateDirectory(settings.SaveFolder);
+                fullPath = Path.GetFullPath(Path.Combine(settings.SaveFolder, GetAvailableFileName(settings.SaveFolder, fileName)));
+                using var output = new FileStream(fullPath, FileMode.CreateNew, FileAccess.Write);
+                bmp.Save(output, ImageFormat.Png);
+            }
 
             var saveFolder = Path.GetDirectoryName(fullPath)!;
             if (!string.Equals(settings.SaveFolder, saveFolder, StringComparison.OrdinalIgnoreCase))
