@@ -9,7 +9,7 @@ internal sealed class Settings
     private string _fileNamePattern = DefaultFileNamePattern;
 
     public string SaveFolder { get; set; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Screenshots");
+        Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "FloatShotScreenshots");
 
     public string FileNamePattern
     {

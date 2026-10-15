@@ -75,11 +75,15 @@ Manual install validation:
 - `Ctrl+Z` undoes the most recent annotation.
 - Pin creates a floating pinned image with annotations included.
 - Copy places the annotated image on the clipboard.
+- `Enter`, `C`, and `Ctrl+C` invoke Copy without creating an image file or save directory.
 - Save remains a neutral icon and writes directly to the configured folder; no Save As dialog appears.
 - With Open folder after capture disabled (the default), quick Save must leave the foreground application unchanged.
 - Hovering over Save shows the configured destination and shortcut.
-- The small Save arrow, or right-clicking Save, opens a menu containing the destination, Save, and Save as.
-- `S` and `Enter` invoke quick Save; `Ctrl+Shift+S` invokes explicit Save As.
+- The small Save arrow, or right-clicking Save, opens a menu containing the destination, Save, Save as, and Set save folder.
+- Set save folder opens a folder picker without saving or discarding the current screenshot selection.
+- Confirming a folder immediately updates the menu path and Save hover hint, and remembers the preference across restarts even if this screenshot is cancelled.
+- Cancelling the folder picker leaves the configured folder and current selection unchanged.
+- `S` and `Ctrl+S` invoke quick Save; `Ctrl+Shift+S` invokes explicit Save As.
 - Save As opens a dialog with a suggested filename containing date, hours, minutes, seconds, and milliseconds.
 - The configured folder, or the last successfully selected folder, is used as the initial Save As location.
 - Existing suggested filenames receive `_1`, `_2`, and subsequent suffixes instead of being offered again.
@@ -98,6 +102,9 @@ Manual install validation:
 
 ## Settings
 
+- Fresh settings default to the Windows Pictures folder plus `FloatShotScreenshots`, with no spaces in the new subfolder name.
+- The Pictures path follows Windows known-folder resolution on English and non-English systems, including redirected folders.
+- Existing saved locations, including the old `Screenshots` directory and custom paths with spaces or non-English characters, are preserved after upgrading and restarting.
 - Save folder can be changed with Browse.
 - Default mode changes the floating button action.
 - Hotkey fields persist after Save.

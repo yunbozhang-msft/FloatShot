@@ -32,7 +32,7 @@ internal static class RegionCapture
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
 
-    public static RegionResult? Pick(string? saveFolder = null)
+    public static RegionResult? Pick(string? saveFolder = null, Action<string>? saveFolderChanged = null)
     {
         // Snapshot the whole virtual screen BEFORE showing the overlay so we
         // get the real underlying content (devbox / w365 projection too).
@@ -49,7 +49,7 @@ internal static class RegionCapture
 
         try
         {
-            using var f = new OverlayForm(snapshot, virt, saveFolder);
+            using var f = new OverlayForm(snapshot, virt, saveFolder, saveFolderChanged);
             var dr = f.ShowDialog();
             if (dr != DialogResult.OK || f.Action == RegionAction.Cancel) return null;
 
@@ -71,7 +71,8 @@ internal static class RegionCapture
     {
         private readonly Bitmap _snapshot;
         private readonly Rectangle _virt;
-        private readonly string _saveFolder;
+        private string _saveFolder;
+        private readonly Action<string>? _saveFolderChanged;
         private Point _start;
         private Rectangle _sel;            // overlay-local coordinates
         private SelectionDragMode _dragMode;
@@ -90,15 +91,17 @@ internal static class RegionCapture
         private ToolButton? _hoveredButton;
         private string? _toolTipText;
         private ContextMenuStrip? _saveMenu;
+        private ToolStripLabel? _saveFolderLabel;
 
         public Rectangle SelectedScreenRect { get; private set; }
         public RegionAction Action { get; private set; } = RegionAction.Cancel;
 
-        public OverlayForm(Bitmap snapshot, Rectangle virt, string? saveFolder = null)
+        public OverlayForm(Bitmap snapshot, Rectangle virt, string? saveFolder = null, Action<string>? saveFolderChanged = null)
         {
             _snapshot = snapshot;
             _virt = virt;
             _saveFolder = saveFolder ?? new Settings().SaveFolder;
+            _saveFolderChanged = saveFolderChanged;
             FormBorderStyle = FormBorderStyle.None;
             StartPosition   = FormStartPosition.Manual;
             Bounds          = virt;
@@ -490,9 +493,9 @@ internal static class RegionCapture
                 RegionTool.RectangleMark => "Rectangle mark (M)",
                 RegionTool.Pen => "Freehand pen (B)",
                 RegionTool.Pin => "Pin to screen (P)",
-                RegionTool.Copy => "Copy to clipboard (C)",
-                RegionTool.Save => $"Save to {_saveFolder}\nS / Enter",
-                RegionTool.SaveOptions => "Save options / Save as...",
+                RegionTool.Copy => "Copy to clipboard (Enter / C / Ctrl+C)",
+                RegionTool.Save => $"Save to {_saveFolder}\nS / Ctrl+S",
+                RegionTool.SaveOptions => "Save options",
                 _ => "Cancel capture (Esc)"
             };
             Invalidate();
@@ -587,9 +590,9 @@ internal static class RegionCapture
                     case Keys.M: ToggleEditMode(EditMode.RectangleMark); break;
                     case Keys.B: ToggleEditMode(EditMode.Pen); break;
                     case Keys.P: Confirm(RegionAction.Pin);  break;
-                    case Keys.C: Confirm(RegionAction.Copy); break;
-                    case Keys.S:
-                    case Keys.Enter: Confirm(RegionAction.Save); break;
+                    case Keys.C:
+                    case Keys.Enter: Confirm(RegionAction.Copy); break;
+                    case Keys.S: Confirm(RegionAction.Save); break;
                 }
             }
             else if (e.KeyCode == Keys.Enter && _sel.Width > 0 && _sel.Height > 0)
@@ -672,17 +675,18 @@ internal static class RegionCapture
             {
                 _saveMenu = new ContextMenuStrip { ShowItemToolTips = true };
                 _saveMenu.Items.Add(new ToolStripLabel("Save to") { ForeColor = SystemColors.GrayText });
-                _saveMenu.Items.Add(new ToolStripLabel(_saveFolder)
+                _saveFolderLabel = new ToolStripLabel(_saveFolder)
                 {
                     AutoSize = false,
                     Size = new Size(360, 24),
                     TextAlign = ContentAlignment.MiddleLeft,
                     ToolTipText = _saveFolder
-                });
+                };
+                _saveMenu.Items.Add(_saveFolderLabel);
                 _saveMenu.Items.Add(new ToolStripSeparator());
                 var save = new ToolStripMenuItem("Save", FluentIcon.Get(FluentIcon.Save, 16, Color.FromArgb(60, 60, 60)))
                 {
-                    ShortcutKeyDisplayString = "S / Enter"
+                    ShortcutKeyDisplayString = "S / Ctrl+S"
                 };
                 save.Click += (_, _) => Confirm(RegionAction.Save);
                 _saveMenu.Items.Add(save);
@@ -692,9 +696,36 @@ internal static class RegionCapture
                 };
                 saveAs.Click += (_, _) => Confirm(RegionAction.SaveAs);
                 _saveMenu.Items.Add(saveAs);
+                _saveMenu.Items.Add(new ToolStripSeparator());
+                var setFolder = new ToolStripMenuItem("Set save folder...", FluentIcon.Get(FluentIcon.Settings, 16, Color.FromArgb(60, 60, 60)));
+                setFolder.Click += (_, _) => SetSaveFolder();
+                _saveMenu.Items.Add(setFolder);
             }
             var anchor = _buttons.First(button => button.Tool == RegionTool.SaveOptions).Bounds;
             _saveMenu.Show(this, new Point(anchor.Right - _saveMenu.PreferredSize.Width, anchor.Bottom + 4));
+        }
+
+        private void SetSaveFolder()
+        {
+            ResetToolTip();
+            _saveMenu?.Close();
+            using var dialog = new FolderBrowserDialog
+            {
+                Description = "Choose the default screenshot folder",
+                UseDescriptionForTitle = true,
+                SelectedPath = _saveFolder,
+                ShowNewFolderButton = true
+            };
+            if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+            _saveFolder = dialog.SelectedPath;
+            _saveFolderChanged?.Invoke(_saveFolder);
+            if (_saveFolderLabel is not null)
+            {
+                _saveFolderLabel.Text = _saveFolder;
+                _saveFolderLabel.ToolTipText = _saveFolder;
+            }
+            Invalidate();
         }
 
         private void ToggleEditMode(EditMode mode)

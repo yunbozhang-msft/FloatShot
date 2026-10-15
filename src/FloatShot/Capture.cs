@@ -37,7 +37,11 @@ internal static class Capture
 
     private static string? RunRegion(Settings settings)
     {
-        var result = RegionCapture.Pick(settings.SaveFolder);
+        var result = RegionCapture.Pick(settings.SaveFolder, folder =>
+        {
+            settings.SaveFolder = folder;
+            settings.Save();
+        });
         if (result is null) return null;
 
         var bmp = result.Image;   // already cropped from the pre-overlay snapshot
