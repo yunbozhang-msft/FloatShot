@@ -21,6 +21,7 @@ internal sealed class FloatingButton : Form
     private const int Diameter  = 40;
     private const int ShadowPad = 6;
     private const int Total     = Diameter + ShadowPad * 2;
+    private const int DockWidth = 32;
     private const int DragThreshold = 4;
 
     private bool _mouseDown, _isDragging, _isHovered, _isPressed;
@@ -102,7 +103,7 @@ internal sealed class FloatingButton : Form
     private Screen DockScreen() => Screen.AllScreens.FirstOrDefault(screen => screen.DeviceName == _dockScreenName) ?? Screen.FromRectangle(Bounds);
     private void UpdateFrameSize()
     {
-        Size = new Size(Pixels(_collapsed ? 24 : Total), Pixels(Total));
+        Size = new Size(Pixels(_collapsed ? DockWidth : Total), Pixels(Total));
         AccessibleName = _collapsed ? "Capture screenshot (docked)" : "Capture screenshot";
     }
 
@@ -228,7 +229,7 @@ internal sealed class FloatingButton : Form
             {
                 var tab = new RectangleF(_dockSide == FloatingDockSide.Left ? -Pixels(8) : Pixels(2), Pixels(7), Width + Pixels(6), Height - Pixels(14));
                 using var shape = Rounded(tab, Pixels(10));
-                using var fill = new SolidBrush(Color.FromArgb(250, 255, 255, 255));
+                using var fill = new SolidBrush(Color.FromArgb(166, 255, 255, 255));
                 using var border = new Pen(_isHovered ? Fluent.AccentHover : Fluent.Accent, Pixels(1));
                 g.FillPath(fill, shape); g.DrawPath(border, shape);
                 var brand = AppIcon.GetBitmap(Pixels(20));

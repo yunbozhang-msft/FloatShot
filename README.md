@@ -126,11 +126,13 @@ Use the latest installer, or exit FloatShot from the tray menu before installing
 
 - Drag the floating button to place it where you want.
 - Drag it to the left or right edge of its current monitor to dock as a narrow FloatShot tab. Click the tab once to capture directly, or drag it away from the edge to return to the full floating button.
+- Docked tabs have a 35% transparent white background and extra space around the unchanged, fully opaque FloatShot icon.
 - Right-click the floating button or dock tab for Dock left, Dock right, and Undock. Docking side and display position are remembered; removing a display moves the button back onto an available screen.
 - Click the button for the default capture mode.
 - Use Settings to change save folder, default mode, hotkeys, clipboard behavior, floating button visibility, and startup behavior.
 - In region capture mode, drag to select an area, then resize or move the selection before choosing an action.
 - Use the toolbar to annotate, pin, copy, save, or cancel. Rectangle supports Outline and Solid; highlighter stays translucent; mosaic supports Brush and Rectangle with a strength slider; text supports color, size, and bold.
+- Highlighter uses a vertical, width-matched cursor. Mosaic Strength controls pixel block size from 2 to 40; Brush Size independently controls the covered area, shown by a circular cursor with a translucent white fill. Rectangle mosaic shows a temporary outline while dragging, which disappears on release and is not exported.
 - Click an active drawing tool again to deselect it and move or resize the capture frame. New captures always start in selection mode.
 - Click to add text, click away or switch tools to finish, and press Esc while typing to cancel the text edit. In selection mode, drag text to move it or double-click it to edit again.
 - Tool colors, widths, rectangle fill, mosaic mode/strength, and text options are remembered across restarts and shared by captures and pinned images. Captured images and annotation contents are not stored in settings.

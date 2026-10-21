@@ -24,7 +24,7 @@ internal sealed class AnnotationStyle
     {
         ColorArgb = Ink.ToArgb();
         Width = Math.Clamp(Width, 2, 80);
-        Strength = Math.Clamp(Strength, 8, 40);
+        Strength = Math.Clamp(Strength, 2, 40);
         FontSize = Math.Clamp(FontSize, 12, 72);
     }
 }
@@ -203,7 +203,10 @@ internal sealed class AnnotationDocument : IDisposable
             using (var downsample = Graphics.FromImage(pixels))
             {
                 downsample.InterpolationMode = InterpolationMode.HighQualityBilinear;
-                downsample.DrawImage(sample, new Rectangle(Point.Empty, pixels.Size), 0, 0, sample.Width, sample.Height, GraphicsUnit.Pixel);
+                downsample.PixelOffsetMode = PixelOffsetMode.Half;
+                downsample.CompositingMode = CompositingMode.SourceCopy;
+                using var edge = new ImageAttributes(); edge.SetWrapMode(WrapMode.TileFlipXY);
+                downsample.DrawImage(sample, new Rectangle(Point.Empty, pixels.Size), 0, 0, sample.Width, sample.Height, GraphicsUnit.Pixel, edge);
             }
             using var graphics = Graphics.FromImage(target);
             graphics.SetClip(mask); graphics.InterpolationMode = InterpolationMode.NearestNeighbor; graphics.PixelOffsetMode = PixelOffsetMode.Half;
@@ -213,7 +216,7 @@ internal sealed class AnnotationDocument : IDisposable
         }
         using var canvas = Graphics.FromImage(target);
         canvas.SmoothingMode = SmoothingMode.AntiAlias; canvas.PixelOffsetMode = PixelOffsetMode.HighQuality;
-        using var brush = new SolidBrush(annotation.Tool == AnnotationTool.Highlight ? Color.FromArgb(86, style.Ink) : style.Ink);
+        using var brush = new SolidBrush(annotation.Tool == AnnotationTool.Highlight ? Color.FromArgb(115, style.Ink) : style.Ink);
         switch (annotation.Tool)
         {
             case AnnotationTool.Rectangle:

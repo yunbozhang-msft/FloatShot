@@ -51,6 +51,7 @@ Manual install validation:
 - Floating button appears after launch.
 - Floating icon uses a matching high-resolution bitmap at 100%, 150%, and 200% DPI without enlarging a default small icon.
 - Dropping near the current monitor's left or right working-area edge creates a narrow tab with the FloatShot icon. The taskbar remains unobstructed.
+- Docked tabs use a 32px logical width with about 4px of inner padding and a 35% transparent white background. The 20px icon stays fully opaque. Verify both edges and actual screen blending over a colored background, not only bitmap alpha.
 - Clicking either dock tab triggers the configured capture once, without an extra expansion click. Dragging a tab away undocks it and must not trigger capture.
 - Right-click Dock left, Dock right, and Undock work; an open menu prevents automatic collapse of an expanded docked button.
 - Dock side, monitor identity, and vertical position survive restart. Negative X/Y coordinates on left/above monitors are preserved.
@@ -88,8 +89,10 @@ Manual install validation:
 - Use actual desktop mouse input to click each tool twice at the same screen position. Opening or closing a wider parameter bar must not move the primary tool buttons horizontally or vertically, including near the left and bottom screen edges.
 - After deselection, verify a real screen capture shows the old parameter area restored to the underlying image, not a white residual bar. Calling a button event directly or checking only `Visible` is insufficient. Repeat for pinned-image annotation toolbars opened with Space.
 - Rectangle supports Outline and Solid; Solid hides the unused width control and fully covers the selected area.
-- Arrow and Pen use the chosen color and width; highlighter stays translucent, including self-overlapping strokes.
-- Mosaic supports Rectangle and Brush, exposes only a Mosaic strength slider, and leaves pixels outside the mask untouched.
+- Arrow and Pen use the chosen color and width; highlighter stays translucent, including self-overlapping strokes. Its vertical cursor follows width and pinned-image zoom, and leaving the tool restores the normal cursor.
+- Mosaic supports Rectangle and Brush with Strength from 2 to 40 in single-unit steps. Brush exposes an independent Size slider; the filled circular cursor follows size and zoom, keeps a 65% opaque white interior, and remains transparent outside the circle. Strength must not change cursor size. Rectangle hides the unused Size control.
+- Dragging rectangle mosaic shows a temporary high-contrast outline that vanishes on mouse release without entering the exported image. Test reverse dragging, crop offsets, and zoom in captures and pinned images.
+- Verify high-contrast details are fully pixelated along the first row and all four mosaic edges, without transparent sampling fringes. The minimum strength must produce genuinely finer blocks than the previous 8px minimum; pixels outside either mask stay untouched.
 - Text supports color, size, bold, multiline and non-English input. Click away or switch tools to finish; Esc while typing cancels only the current text edit.
 - During text editing, a thin input border remains visible while the original screenshot shows through instead of an opaque white fill. Check patterned backgrounds stay aligned after multiline typing and deletion in both captures and pinned images. The border disappears on commit or cancel and is not exported.
 - Text remains editable on double-click and movable by dragging in selection mode.

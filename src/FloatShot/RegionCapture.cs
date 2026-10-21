@@ -167,7 +167,7 @@ internal static class RegionCapture
                     _sel = ResizeSelection(_dragStartSelection, _resizeEdge, args.Location);
                     break;
                 default:
-                    if (_selected) Cursor = _editor.Tool == AnnotationTool.None ? CursorForResize(HitTestResize(args.Location), _sel.Contains(args.Location)) : _editor.Tool == AnnotationTool.Text ? Cursors.IBeam : Cursors.Cross;
+                    if (_selected) Cursor = _editor.Tool == AnnotationTool.None ? CursorForResize(HitTestResize(args.Location), _sel.Contains(args.Location)) : _editor.DrawingCursor;
                     return;
             }
             if (_selected) { SelectedScreenRect = ToScreenRect(_sel); _editor.BoundsChanged(); PositionToolbar(); }

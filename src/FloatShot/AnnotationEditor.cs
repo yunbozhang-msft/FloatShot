@@ -15,7 +15,7 @@ internal sealed class AnnotationToolbar : UserControl
     private static readonly Color Hairline = Color.FromArgb(229, 229, 229);
     private readonly FlowLayoutPanel _tools = new BufferedFlowPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty, Padding = Padding.Empty };
     private readonly FlowLayoutPanel _options = new BufferedFlowPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty, Padding = new Padding(5, 3, 5, 3) };
-    private readonly Dictionary<(AnnotationTool Tool, bool Filled), (AnnotationStyle Style, FlowLayoutPanel Panel)> _optionPages = new();
+    private readonly Dictionary<(AnnotationTool Tool, bool Variant), (AnnotationStyle Style, FlowLayoutPanel Panel)> _optionPages = new();
     private FlowLayoutPanel _optionPage = null!;
     private bool _updatingOptions;
     private readonly ToolTip _tips = new() { InitialDelay = 350, ReshowDelay = 100, AutoPopDelay = 10000 };
@@ -106,7 +106,7 @@ internal sealed class AnnotationToolbar : UserControl
         if (tool != AnnotationTool.None)
         {
             var style = preferences.For(tool);
-            var key = (tool, tool == AnnotationTool.Rectangle && style.Filled);
+            var key = (tool, tool == AnnotationTool.Rectangle ? style.Filled : tool == AnnotationTool.Mosaic && style.Brush);
             bool createPage = !_optionPages.TryGetValue(key, out var cached) || !ReferenceEquals(cached.Style, style);
             if (createPage)
             {
@@ -127,7 +127,13 @@ internal sealed class AnnotationToolbar : UserControl
             if (tool == AnnotationTool.Mosaic)
             {
                 AddChoices(("Brush", () => style.Brush, () => style.Brush = true), ("Rectangle", () => !style.Brush, () => style.Brush = false));
-                AddSlider(8, 40, style.Strength, "Mosaic strength", value => style.Strength = value);
+                _optionPage.Controls.Add(new Label { Text = "Strength", AutoSize = true, UseCompatibleTextRendering = false, UseMnemonic = false, ForeColor = Muted, Margin = ControlPadding(12, 6, 5, 0) });
+                AddSlider(2, 40, style.Strength, "Mosaic strength", value => style.Strength = value);
+                if (style.Brush)
+                {
+                    _optionPage.Controls.Add(new Label { Text = "Size", AutoSize = true, UseCompatibleTextRendering = false, UseMnemonic = false, ForeColor = Muted, Margin = ControlPadding(12, 6, 5, 0) });
+                    AddSlider(2, 80, style.Width, "Mosaic brush size", value => style.Width = value);
+                }
             }
             else if (tool == AnnotationTool.Text)
             {
@@ -233,7 +239,7 @@ internal sealed class AnnotationToolbar : UserControl
 
     private void AddSlider(int minimum, int maximum, int value, string label, Action<int> change)
     {
-        var slider = new ToolbarSlider { Minimum = minimum, Maximum = maximum, Value = Math.Clamp(value, minimum, maximum), Size = ControlSize(label == "Mosaic strength" ? 120 : 84, 30), Margin = ControlPadding(4, 0, 3, 0), AccessibleName = label, Step = label == "Mosaic strength" ? 4 : 1 };
+        var slider = new ToolbarSlider { Minimum = minimum, Maximum = maximum, Value = Math.Clamp(value, minimum, maximum), Size = ControlSize(label == "Mosaic strength" ? 120 : 84, 30), Margin = ControlPadding(4, 0, 3, 0), AccessibleName = label, Step = 1 };
         _tips.SetToolTip(slider, label);
         Label? output = label == "Mosaic strength" ? null : new Label { Text = slider.Value + " px", AutoSize = false, UseCompatibleTextRendering = false, UseMnemonic = false, Size = ControlSize(44, 30), TextAlign = ContentAlignment.MiddleLeft, ForeColor = Muted, Margin = ControlPadding(4, 0, 3, 0) };
         slider.ValueChanged += (_, _) => { if (output is not null) output.Text = slider.Value + " px"; if (_updatingOptions) return; change(slider.Value); PreferenceChanged?.Invoke(); };
@@ -477,22 +483,26 @@ internal sealed class AnnotationEditor : IDisposable
     private int _movingIndex = -1;
     private PointF _moveStart;
     private Annotation? _moveOriginal;
+    private readonly Cursor _selectionCursor;
+    private readonly Dictionary<(int Height, int Edge, int Color), (Cursor Cursor, IntPtr Handle)> _highlightCursors = new();
+    private readonly Dictionary<(int Diameter, int Edge), (Cursor Cursor, IntPtr Handle)> _mosaicCursors = new();
 
     public AnnotationDocument Document { get; }
     public AnnotationToolbar Toolbar { get; } = new();
     public AnnotationTool Tool { get; private set; }
     public bool EditingText => _textBox is not null;
     public bool Drawing => _preview is not null;
+    public Cursor DrawingCursor => Tool == AnnotationTool.Text ? Cursors.IBeam : Tool == AnnotationTool.Highlight ? HighlightCursor() : Tool == AnnotationTool.Mosaic && _settings.Annotation.Mosaic.Brush ? MosaicCursor() : Cursors.Cross;
     public event Action? Changed;
     public event Action<string>? ActionRequested;
 
     public AnnotationEditor(Control host, Bitmap source, Func<Rectangle> displayBounds, Func<Rectangle> sourceBounds, Settings settings)
     {
-        _host = host; _displayBounds = displayBounds; _sourceBounds = sourceBounds; _settings = settings;
+        _host = host; _displayBounds = displayBounds; _sourceBounds = sourceBounds; _settings = settings; _selectionCursor = host.Cursor;
         _settings.Annotation ??= new(); _settings.Annotation.Normalize();
         Document = new AnnotationDocument(source);
         Toolbar.ToolSelected += ToggleTool;
-        Toolbar.PreferenceChanged += () => { _settings.Save(); UpdateTextBox(); Changed?.Invoke(); };
+        Toolbar.PreferenceChanged += () => { _settings.Save(); UpdateTextBox(); UpdateDrawingCursor(); Changed?.Invoke(); };
         Toolbar.ActionRequested += action =>
         {
             CommitText();
@@ -505,6 +515,108 @@ internal sealed class AnnotationEditor : IDisposable
     }
 
     private float Zoom => _displayBounds().Width / (float)Math.Max(1, _sourceBounds().Width);
+    private void UpdateDrawingCursor() => _host.Cursor = Tool == AnnotationTool.None ? _selectionCursor : DrawingCursor;
+
+    private Cursor HighlightCursor()
+    {
+        var style = _settings.Annotation.Highlight;
+        int height = Math.Max(1, (int)Math.Round(style.Width * Zoom));
+        int edge = Math.Max(1, (int)Math.Round(_host.DeviceDpi / 96f));
+        var key = (height, edge, style.Ink.ToArgb());
+        if (_highlightCursors.TryGetValue(key, out var cached)) return cached.Cursor;
+        using var image = new Bitmap(edge * 5, height + edge * 2);
+        using (var graphics = Graphics.FromImage(image))
+        {
+            graphics.Clear(Color.Transparent);
+            graphics.FillRectangle(Brushes.Black, 0, 0, image.Width, image.Height);
+            graphics.FillRectangle(Brushes.White, edge, edge, edge * 3, height);
+            using var ink = new SolidBrush(style.Ink);
+            graphics.FillRectangle(ink, edge * 2, edge, edge, height);
+        }
+        var native = CreateDrawingCursor(image);
+        _highlightCursors.Add(key, native);
+        return native.Cursor;
+    }
+
+    private Cursor MosaicCursor()
+    {
+        int diameter = Math.Max(1, (int)Math.Round(_settings.Annotation.Mosaic.Width * Zoom));
+        int edge = Math.Max(1, (int)Math.Round(_host.DeviceDpi / 96f));
+        var key = (diameter, edge);
+        if (_mosaicCursors.TryGetValue(key, out var cached)) return cached.Cursor;
+        using var image = new Bitmap(diameter + edge * 2, diameter + edge * 2);
+        using (var graphics = Graphics.FromImage(image))
+        {
+            graphics.Clear(Color.Transparent); graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using var fill = new SolidBrush(Color.FromArgb(166, Color.White));
+            using var dark = new Pen(Color.FromArgb(48, Color.Black), edge * 3);
+            using var light = new Pen(Color.FromArgb(220, Color.White), edge * 2);
+            graphics.FillEllipse(fill, edge, edge, diameter, diameter);
+            graphics.DrawEllipse(dark, edge, edge, diameter, diameter);
+            graphics.DrawEllipse(light, edge, edge, diameter, diameter);
+        }
+        var native = CreateDrawingCursor(image);
+        _mosaicCursors.Add(key, native);
+        return native.Cursor;
+    }
+
+    private static (Cursor Cursor, IntPtr Handle) CreateDrawingCursor(Bitmap image)
+    {
+        var header = new NativeCursorBitmap { Size = (uint)Marshal.SizeOf<NativeCursorBitmap>(), Width = image.Width, Height = -image.Height, Planes = 1, BitCount = 32 };
+        var color = CreateDIBSection(IntPtr.Zero, ref header, 0, out var pixels, IntPtr.Zero, 0);
+        if (color == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+        try
+        {
+            var data = image.LockBits(new Rectangle(Point.Empty, image.Size), System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            try
+            {
+                var row = new byte[image.Width * 4];
+                for (int vertical = 0; vertical < image.Height; vertical++)
+                {
+                    Marshal.Copy(IntPtr.Add(data.Scan0, vertical * data.Stride), row, 0, row.Length);
+                    Marshal.Copy(row, 0, IntPtr.Add(pixels, vertical * row.Length), row.Length);
+                }
+            }
+            finally { image.UnlockBits(data); }
+            using var mask = new Bitmap(image.Width, image.Height, System.Drawing.Imaging.PixelFormat.Format1bppIndexed);
+            var maskHandle = mask.GetHbitmap();
+            try
+            {
+                var info = new NativeCursorInfo { IsIcon = false, HotspotX = (uint)(image.Width / 2), HotspotY = (uint)(image.Height / 2), Mask = maskHandle, Color = color };
+                var handle = CreateIconIndirect(ref info);
+                if (handle == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+                return (new Cursor(handle), handle);
+            }
+            finally { DeleteObject(maskHandle); }
+        }
+        finally { DeleteObject(color); }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeCursorBitmap
+    {
+        public uint Size;
+        public int Width, Height;
+        public ushort Planes, BitCount;
+        public uint Compression, ImageSize;
+        public int HorizontalResolution, VerticalResolution;
+        public uint UsedColors, ImportantColors;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeCursorInfo
+    {
+        [MarshalAs(UnmanagedType.Bool)] public bool IsIcon;
+        public uint HotspotX, HotspotY;
+        public IntPtr Mask, Color;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetIconInfo(IntPtr icon, out NativeCursorInfo info);
+    [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr CreateIconIndirect(ref NativeCursorInfo info);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool DestroyCursor(IntPtr cursor);
+    [DllImport("gdi32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool DeleteObject(IntPtr handle);
+    [DllImport("gdi32.dll", SetLastError = true)] private static extern IntPtr CreateDIBSection(IntPtr context, ref NativeCursorBitmap info, uint usage, out IntPtr pixels, IntPtr section, uint offset);
+
     private PointF ToImage(Point point)
     {
         var display = _displayBounds(); var source = _sourceBounds();
@@ -514,7 +626,7 @@ internal sealed class AnnotationEditor : IDisposable
     public void ToggleTool(AnnotationTool tool)
     {
         CommitText(); CancelStroke(); Tool = Tool == tool ? AnnotationTool.None : tool;
-        Toolbar.UpdateState(Tool, _settings.Annotation); Changed?.Invoke();
+        Toolbar.UpdateState(Tool, _settings.Annotation); UpdateDrawingCursor(); Changed?.Invoke();
     }
 
     public bool MouseDown(MouseEventArgs args)
@@ -666,16 +778,32 @@ internal sealed class AnnotationEditor : IDisposable
     {
         using var image = Document.Render(_sourceBounds(), _preview, _editingIndex >= 0 ? _editingIndex : _movingIndex);
         graphics.DrawImage(image, _displayBounds());
+        if (_preview is not { Tool: AnnotationTool.Mosaic, Style.Brush: false } preview || preview.Bounds.Width <= 0 || preview.Bounds.Height <= 0) return;
+        var source = _sourceBounds(); var display = _displayBounds(); var bounds = preview.Bounds;
+        var outline = new RectangleF(display.Left + (bounds.Left - source.Left) * Zoom, display.Top + (bounds.Top - source.Top) * Zoom, bounds.Width * Zoom, bounds.Height * Zoom);
+        float width = _host.DeviceDpi / 96f;
+        using var clip = graphics.Clip;
+        graphics.SetClip(display, CombineMode.Intersect);
+        using var halo = new Pen(Color.White, width * 3);
+        using var border = new Pen(Color.FromArgb(40, 40, 40), width) { DashStyle = DashStyle.Dash };
+        graphics.DrawRectangle(halo, outline.X, outline.Y, outline.Width, outline.Height);
+        graphics.DrawRectangle(border, outline.X, outline.Y, outline.Width, outline.Height);
+        graphics.Clip = clip;
     }
 
     public Bitmap Export() { CommitText(); return Document.Render(_sourceBounds()); }
     public void Undo() { CommitText(); Document.Undo(); RefreshHistory(); Notify(); }
     public void Redo() { CommitText(); Document.Redo(); RefreshHistory(); Notify(); }
-    public void BoundsChanged() { _textBox?.ReplaceBackground(Document.Render(_sourceBounds(), excluded: _editingIndex)); UpdateTextBox(); Notify(); }
+    public void BoundsChanged() { _textBox?.ReplaceBackground(Document.Render(_sourceBounds(), excluded: _editingIndex)); UpdateTextBox(); UpdateDrawingCursor(); Notify(); }
     public void CancelStroke() { _preview = null; _movingIndex = -1; _moveOriginal = null; _host.Capture = false; }
     private void RefreshHistory() => Toolbar.SetHistory(Document.CanUndo, Document.CanRedo);
     private void Notify() { _host.Invalidate(); Changed?.Invoke(); }
-    public void Dispose() { CloseTextBox(); Document.Dispose(); Toolbar.Dispose(); }
+    public void Dispose()
+    {
+        CloseTextBox(); _host.Cursor = _selectionCursor;
+        foreach (var cursor in _highlightCursors.Values.Concat(_mosaicCursors.Values)) { cursor.Cursor.Dispose(); DestroyCursor(cursor.Handle); }
+        _highlightCursors.Clear(); _mosaicCursors.Clear(); Document.Dispose(); Toolbar.Dispose();
+    }
 
     private sealed class ScreenshotTextBox(Bitmap background) : TextBox
     {

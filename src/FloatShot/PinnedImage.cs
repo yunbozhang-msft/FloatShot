@@ -117,7 +117,7 @@ internal sealed class PinnedImage : Form
             var current = Cursor.Position;
             Location = new Point(_formStart.X + current.X - _dragStartScreen.X, _formStart.Y + current.Y - _dragStartScreen.Y);
         }
-        Cursor = _editor.Tool == AnnotationTool.None ? Cursors.SizeAll : _editor.Tool == AnnotationTool.Text ? Cursors.IBeam : Cursors.Cross;
+        Cursor = _editor.Tool == AnnotationTool.None ? Cursors.SizeAll : _editor.DrawingCursor;
     }
 
     protected override void OnMouseUp(MouseEventArgs args)
