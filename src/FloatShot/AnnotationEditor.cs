@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace FloatShot;
@@ -11,8 +13,11 @@ internal sealed class AnnotationToolbar : UserControl
     private static readonly Color Accent = Color.FromArgb(177, 31, 75);
     private static readonly Color AccentSoft = Color.FromArgb(251, 236, 241);
     private static readonly Color Hairline = Color.FromArgb(229, 229, 229);
-    private readonly FlowLayoutPanel _tools = new() { AutoSize = true, WrapContents = false, Margin = Padding.Empty, Padding = Padding.Empty };
-    private readonly FlowLayoutPanel _options = new() { AutoSize = true, WrapContents = false, Margin = Padding.Empty, Padding = new Padding(5, 5, 5, 5) };
+    private readonly FlowLayoutPanel _tools = new BufferedFlowPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty, Padding = Padding.Empty };
+    private readonly FlowLayoutPanel _options = new BufferedFlowPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty, Padding = new Padding(5, 3, 5, 3) };
+    private readonly Dictionary<(AnnotationTool Tool, bool Filled), (AnnotationStyle Style, FlowLayoutPanel Panel)> _optionPages = new();
+    private FlowLayoutPanel _optionPage = null!;
+    private bool _updatingOptions;
     private readonly ToolTip _tips = new() { InitialDelay = 350, ReshowDelay = 100, AutoPopDelay = 10000 };
     private readonly Dictionary<AnnotationTool, ToolbarButton> _toolButtons = new();
     private readonly Dictionary<string, ToolbarButton> _actions = new();
@@ -29,6 +34,7 @@ internal sealed class AnnotationToolbar : UserControl
         BackColor = Surface;
         Padding = new Padding(6);
         Font = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+        _options.Font = new Font("Segoe UI", 8.25f, FontStyle.Regular, GraphicsUnit.Point);
         SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
         Controls.Add(_tools); Controls.Add(_options);
         foreach (var (tool, icon, label) in new[]
@@ -79,6 +85,7 @@ internal sealed class AnnotationToolbar : UserControl
 
     public void UpdateState(AnnotationTool tool, AnnotationPreferences preferences)
     {
+        using var redraw = new RedrawBatch(this);
         _tool = tool; _preferences = preferences;
         foreach (var entry in _toolButtons)
         {
@@ -87,27 +94,40 @@ internal sealed class AnnotationToolbar : UserControl
             entry.Value.Invalidate();
         }
         SuspendLayout();
-        foreach (Control control in _options.Controls.Cast<Control>().ToArray()) { _options.Controls.Remove(control); control.Dispose(); }
-        _options.Visible = tool != AnnotationTool.None;
+        _options.SuspendLayout();
+        _options.Visible = false;
         if (tool != AnnotationTool.None)
         {
             var style = preferences.For(tool);
+            var key = (tool, tool == AnnotationTool.Rectangle && style.Filled);
+            bool createPage = !_optionPages.TryGetValue(key, out var cached) || !ReferenceEquals(cached.Style, style);
+            if (createPage)
+            {
+                if (cached.Panel is not null) { _options.Controls.Remove(cached.Panel); cached.Panel.Dispose(); }
+                _optionPage = new BufferedFlowPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty, Padding = Padding.Empty, Visible = false };
+                _optionPages[key] = (style, _optionPage);
+                _options.Controls.Add(_optionPage);
+            }
+            else _optionPage = cached.Panel;
+            foreach (Control page in _options.Controls) page.Visible = page == _optionPage;
+            if (createPage)
+            {
             if (tool != AnnotationTool.Mosaic) AddColors(style);
             if (tool == AnnotationTool.Rectangle)
             {
-                AddChoices(("Outline", !style.Filled, () => style.Filled = false), ("Solid", style.Filled, () => style.Filled = true));
+                AddChoices(("Outline", () => !style.Filled, () => style.Filled = false), ("Solid", () => style.Filled, () => style.Filled = true));
             }
             if (tool == AnnotationTool.Mosaic)
             {
-                AddChoices(("Brush", style.Brush, () => style.Brush = true), ("Rectangle", !style.Brush, () => style.Brush = false));
+                AddChoices(("Brush", () => style.Brush, () => style.Brush = true), ("Rectangle", () => !style.Brush, () => style.Brush = false));
                 AddSlider(8, 40, style.Strength, "Mosaic strength", value => style.Strength = value);
             }
             else if (tool == AnnotationTool.Text)
             {
-                var sizes = new ToolbarButton { Text = style.FontSize.ToString(), Size = new Size(55, 27), Margin = new Padding(10, 1, 3, 0), AccessibleName = "Font size", DropDown = true };
+                var sizes = new ToolbarButton { Text = style.FontSize.ToString(), Size = new Size(49, 24), Margin = new Padding(8, 1, 3, 0), AccessibleName = "Font size", DropDown = true, ValueText = () => style.FontSize.ToString() };
                 sizes.Click += (_, _) =>
                 {
-                    var menu = new ContextMenuStrip { Font = Font, ShowImageMargin = false };
+                    var menu = new ContextMenuStrip { Font = _options.Font, ShowImageMargin = false };
                     foreach (int value in new[] { 12, 14, 18, 22, 24, 32, 40, 48, 60, 72 }.Append(style.FontSize).Distinct().Order())
                     {
                         int size = value;
@@ -118,60 +138,74 @@ internal sealed class AnnotationToolbar : UserControl
                     menu.Closed += (_, _) => BeginInvoke(menu.Dispose);
                     menu.Show(sizes, new Point(0, sizes.Height + 3));
                 };
-                _options.Controls.Add(sizes);
-                var bold = IconButton("bold", "Bold"); bold.Size = new Size(28, 28); bold.Active = style.Bold; bold.Indicator = false;
+                _optionPage.Controls.Add(sizes);
+                var bold = IconButton("bold", "Bold"); bold.Size = new Size(24, 24); bold.IconSize = 17; bold.ActiveWhen = () => style.Bold; bold.Indicator = false;
                 bold.Click += (_, _) => { style.Bold = !style.Bold; PreferenceChanged?.Invoke(); UpdateState(_tool, _preferences); };
-                _options.Controls.Add(bold);
+                _optionPage.Controls.Add(bold);
             }
             else if (tool != AnnotationTool.Rectangle || !style.Filled)
             {
-                _options.Controls.Add(new Label { Text = "Width", AutoSize = true, ForeColor = Muted, Margin = new Padding(12, 6, 5, 0) });
+                _optionPage.Controls.Add(new Label { Text = "Width", AutoSize = true, ForeColor = Muted, Margin = new Padding(10, 5, 4, 0) });
                 AddSlider(2, tool == AnnotationTool.Highlight ? 48 : 16, style.Width, "Width", value => style.Width = value);
             }
+            }
+            _updatingOptions = true;
+            try
+            {
+                foreach (var slider in _optionPage.Controls.OfType<ToolbarSlider>()) slider.Value = slider.AccessibleName == "Mosaic strength" ? style.Strength : style.Width;
+            }
+            finally { _updatingOptions = false; }
+            _optionPage.Visible = true;
+            _optionPage.Invalidate(true);
         }
+        _options.ResumeLayout(true);
+        _options.Visible = tool != AnnotationTool.None;
         int padding = Math.Max(6, (int)Math.Round(6 * DeviceDpi / 96f));
         _tools.Location = new Point(padding, padding);
         _tools.Size = _tools.PreferredSize;
-        _options.Location = new Point(padding, _tools.Bottom + 5);
+        _options.Location = new Point(padding, _tools.Bottom + 4);
         _options.Size = _options.PreferredSize;
         Size = new Size(Math.Max(_tools.PreferredSize.Width, _options.Visible ? _options.PreferredSize.Width : 0) + padding * 2, (_options.Visible ? _options.Bottom : _tools.Bottom) + padding);
-        using (var outline = Rounded(new RectangleF(0, 0, Width, Height), 7))
+        if (Region is null || _regionSize != Size)
         {
-            var previous = Region; Region = new Region(outline); previous?.Dispose();
+            using var outline = Rounded(new RectangleF(0, 0, Width, Height), 7);
+            var previous = Region; Region = new Region(outline); previous?.Dispose(); _regionSize = Size;
         }
         ResumeLayout(); Invalidate();
     }
 
-    private void AddChoices(params (string Label, bool Selected, Action Change)[] choices)
+    private Size _regionSize;
+
+    private void AddChoices(params (string Label, Func<bool> Selected, Action Change)[] choices)
     {
         var group = new SegmentedPanel { AutoSize = true, WrapContents = false, Padding = new Padding(2), Margin = new Padding(9, 0, 3, 0), BackColor = Color.FromArgb(245, 245, 245) };
         foreach (var choice in choices)
         {
-            var button = new ToolbarButton { Text = choice.Label, Size = new Size(choice.Label.Length > 7 ? 73 : 59, 24), Margin = Padding.Empty, Active = choice.Selected, Segment = true, Indicator = false, AccessibleName = choice.Label };
+            var button = new ToolbarButton { Text = choice.Label, Size = new Size(choice.Label.Length > 7 ? 66 : 53, 21), Margin = Padding.Empty, ActiveWhen = choice.Selected, Segment = true, Indicator = false, AccessibleName = choice.Label };
             button.Click += (_, _) => { choice.Change(); PreferenceChanged?.Invoke(); UpdateState(_tool, _preferences); };
             group.Controls.Add(button);
         }
-        _options.Controls.Add(group);
+        _optionPage.Controls.Add(group);
     }
 
     private void AddSlider(int minimum, int maximum, int value, string label, Action<int> change)
     {
-        var slider = new ToolbarSlider { Minimum = minimum, Maximum = maximum, Value = Math.Clamp(value, minimum, maximum), Size = new Size(label == "Mosaic strength" ? 110 : 72, 27), Margin = new Padding(3, 0, 2, 0), AccessibleName = label, Step = label == "Mosaic strength" ? 4 : 1 };
+        var slider = new ToolbarSlider { Minimum = minimum, Maximum = maximum, Value = Math.Clamp(value, minimum, maximum), Size = new Size(label == "Mosaic strength" ? 100 : 66, 24), Margin = new Padding(3, 0, 2, 0), AccessibleName = label, Step = label == "Mosaic strength" ? 4 : 1 };
         _tips.SetToolTip(slider, label);
-        Label? output = label == "Mosaic strength" ? null : new Label { Text = slider.Value + " px", AutoSize = false, Size = new Size(37, 26), TextAlign = ContentAlignment.MiddleLeft, ForeColor = Muted, Margin = new Padding(3, 0, 2, 0) };
-        slider.ValueChanged += (_, _) => { change(slider.Value); if (output is not null) output.Text = slider.Value + " px"; PreferenceChanged?.Invoke(); };
-        _options.Controls.Add(slider);
-        if (output is not null) _options.Controls.Add(output);
+        Label? output = label == "Mosaic strength" ? null : new Label { Text = slider.Value + " px", AutoSize = false, Size = new Size(34, 24), TextAlign = ContentAlignment.MiddleLeft, ForeColor = Muted, Margin = new Padding(3, 0, 2, 0) };
+        slider.ValueChanged += (_, _) => { if (output is not null) output.Text = slider.Value + " px"; if (_updatingOptions) return; change(slider.Value); PreferenceChanged?.Invoke(); };
+        _optionPage.Controls.Add(slider);
+        if (output is not null) _optionPage.Controls.Add(output);
     }
 
     private void AddColors(AnnotationStyle style)
     {
         foreach (var color in new[] { Color.FromArgb(230, 45, 45), Color.Yellow, Color.FromArgb(22, 163, 74), Fluent.Accent, Color.Black, Color.White })
         {
-            var swatch = new ToolbarButton { Size = new Size(23, 27), Margin = new Padding(1, 0, 1, 0), AccessibleName = color.Name, Swatch = color, IsSwatchSelected = () => color.ToArgb() == style.ColorArgb };
+            var swatch = new ToolbarButton { Size = new Size(21, 24), Margin = new Padding(1, 0, 1, 0), AccessibleName = color.Name, Swatch = color, IsSwatchSelected = () => color.ToArgb() == style.ColorArgb };
             swatch.Click += (_, _) => { style.ColorArgb = color.ToArgb(); PreferenceChanged?.Invoke(); _options.Invalidate(true); };
             _tips.SetToolTip(swatch, color == Color.Yellow ? "Yellow" : color == Color.White ? "White" : color == Color.Black ? "Black" : color == Fluent.Accent ? "Blue" : color.G > color.R ? "Green" : "Red");
-            _options.Controls.Add(swatch);
+            _optionPage.Controls.Add(swatch);
         }
     }
 
@@ -185,7 +219,7 @@ internal sealed class AnnotationToolbar : UserControl
         if (_options.Visible) args.Graphics.DrawLine(border, 1, _options.Top - 3, Width - 2, _options.Top - 3);
     }
 
-    protected override void Dispose(bool disposing) { if (disposing) _tips.Dispose(); base.Dispose(disposing); }
+    protected override void Dispose(bool disposing) { if (disposing) { _tips.Dispose(); _options.Font.Dispose(); } base.Dispose(disposing); }
 
     private static GraphicsPath Rounded(RectangleF bounds, float radius)
     {
@@ -197,7 +231,32 @@ internal sealed class AnnotationToolbar : UserControl
         path.CloseFigure(); return path;
     }
 
-    private sealed class SegmentedPanel : FlowLayoutPanel
+    private class BufferedFlowPanel : FlowLayoutPanel
+    {
+        public BufferedFlowPanel() => SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr parameter, IntPtr data);
+
+    private readonly struct RedrawBatch : IDisposable
+    {
+        private readonly AnnotationToolbar _owner;
+        private readonly bool _active;
+        public RedrawBatch(AnnotationToolbar owner)
+        {
+            _owner = owner; _active = owner.IsHandleCreated && owner.Visible;
+            if (_active) SendMessage(owner.Handle, 0x000B, IntPtr.Zero, IntPtr.Zero);
+        }
+        public void Dispose()
+        {
+            if (!_active || _owner.IsDisposed) return;
+            SendMessage(_owner.Handle, 0x000B, new IntPtr(1), IntPtr.Zero);
+            _owner.Invalidate(true);
+        }
+    }
+
+    private sealed class SegmentedPanel : BufferedFlowPanel
     {
         public SegmentedPanel() => SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
         protected override void OnSizeChanged(EventArgs args)
@@ -219,15 +278,29 @@ internal sealed class AnnotationToolbar : UserControl
     {
         private bool _hovered;
         private bool _pressed;
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public string? IconName { get; set; }
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public Color IconColor { get; set; } = Ink;
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int IconSize { get; set; } = 20;
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool Active { get; set; }
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public Func<bool>? ActiveWhen { get; set; }
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public Func<string>? ValueText { get; set; }
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool Indicator { get; set; } = true;
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool Segment { get; set; }
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool DropDown { get; set; }
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool SplitRight { get; set; }
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public Color? Swatch { get; set; }
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public Func<bool>? IsSwatchSelected { get; set; }
 
         public ToolbarButton()
@@ -246,34 +319,35 @@ internal sealed class AnnotationToolbar : UserControl
         protected override void OnPaint(PaintEventArgs args)
         {
             var graphics = args.Graphics; graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            bool active = ActiveWhen?.Invoke() ?? Active;
             graphics.Clear(Segment ? Parent?.BackColor ?? Surface : Surface);
             if (Swatch is { } color)
             {
                 float centerX = Width / 2f, centerY = Height / 2f;
                 using var fill = new SolidBrush(color); using var white = new Pen(Surface, 2);
                 using var edge = new Pen(IsSwatchSelected?.Invoke() == true ? Ink : Color.FromArgb(200, 200, 200), IsSwatchSelected?.Invoke() == true ? 1.5f : 1);
-                graphics.FillEllipse(fill, centerX - 7, centerY - 7, 14, 14);
-                graphics.DrawEllipse(white, centerX - 8, centerY - 8, 16, 16);
-                graphics.DrawEllipse(edge, centerX - 9, centerY - 9, 18, 18); return;
+                graphics.FillEllipse(fill, centerX - 6, centerY - 6, 12, 12);
+                graphics.DrawEllipse(white, centerX - 7, centerY - 7, 14, 14);
+                graphics.DrawEllipse(edge, centerX - 8, centerY - 8, 16, 16); return;
             }
             var bounds = new RectangleF(1, 1, Width - 2, Height - 2);
-            using var background = new SolidBrush(Segment && Active ? Surface : Active ? AccentSoft : _pressed ? Color.FromArgb(232, 232, 232) : _hovered ? Color.FromArgb(245, 245, 245) : Segment ? Parent?.BackColor ?? Surface : Surface);
+            using var background = new SolidBrush(Segment && active ? Surface : active ? AccentSoft : _pressed ? Color.FromArgb(232, 232, 232) : _hovered ? Color.FromArgb(245, 245, 245) : Segment ? Parent?.BackColor ?? Surface : Surface);
             using var shape = Rounded(bounds, Segment ? 3 : 4);
             graphics.FillPath(background, shape);
-            if (Segment && Active || DropDown)
+            if (Segment && active || DropDown)
             {
                 using var border = new Pen(Hairline); graphics.DrawPath(border, shape);
             }
             if (SplitRight) { using var divider = new Pen(Hairline); graphics.DrawLine(divider, 0, 3, 0, Height - 3); }
-            Color foreground = !Enabled ? Color.FromArgb(185, 185, 185) : Active ? Accent : IconName is null ? Ink : IconColor;
+            Color foreground = !Enabled ? Color.FromArgb(185, 185, 185) : active ? Accent : IconName is null ? Ink : IconColor;
             if (IconName is not null) FluentIcon.Draw(graphics, IconName, ClientRectangle, foreground, IconSize);
             else
             {
                 var textBounds = ClientRectangle;
                 if (DropDown) { textBounds.Width -= 16; FluentIcon.Draw(graphics, "chevron", new Rectangle(Width - 20, 0, 16, Height), Muted, 12); }
-                TextRenderer.DrawText(graphics, Text, Font, textBounds, foreground, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                TextRenderer.DrawText(graphics, ValueText?.Invoke() ?? Text, Font, textBounds, foreground, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
-            if (Active && Indicator && !Segment)
+            if (active && Indicator && !Segment)
             {
                 using var marker = new Pen(Accent, 2) { StartCap = LineCap.Round, EndCap = LineCap.Round };
                 graphics.DrawLine(marker, Width / 2f - 5, Height - 3, Width / 2f + 5, Height - 3);
@@ -284,9 +358,13 @@ internal sealed class AnnotationToolbar : UserControl
     private sealed class ToolbarSlider : Control
     {
         private int _value;
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int Minimum { get; set; }
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int Maximum { get; set; } = 100;
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int Step { get; set; } = 1;
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int Value { get => _value; set { int next = Math.Clamp(value, Minimum, Maximum); if (_value == next) return; _value = next; Invalidate(); ValueChanged?.Invoke(this, EventArgs.Empty); } }
         public event EventHandler? ValueChanged;
 
@@ -355,7 +433,7 @@ internal sealed class AnnotationEditor : IDisposable
         _settings.Annotation ??= new(); _settings.Annotation.Normalize();
         Document = new AnnotationDocument(source);
         Toolbar.ToolSelected += ToggleTool;
-        Toolbar.PreferenceChanged += () => { _settings.Save(); UpdateTextBox(); Notify(); };
+        Toolbar.PreferenceChanged += () => { _settings.Save(); UpdateTextBox(); Changed?.Invoke(); };
         Toolbar.ActionRequested += action =>
         {
             CommitText();
@@ -377,7 +455,7 @@ internal sealed class AnnotationEditor : IDisposable
     public void ToggleTool(AnnotationTool tool)
     {
         CommitText(); CancelStroke(); Tool = Tool == tool ? AnnotationTool.None : tool;
-        Toolbar.UpdateState(Tool, _settings.Annotation); Notify();
+        Toolbar.UpdateState(Tool, _settings.Annotation); Changed?.Invoke();
     }
 
     public bool MouseDown(MouseEventArgs args)

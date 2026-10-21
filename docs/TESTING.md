@@ -4,14 +4,21 @@ Use this checklist before publishing a GitHub release.
 
 ## Build Checks
 
+Use the .NET 10 SDK selected by `global.json`.
+
 ```powershell
 cd src\FloatShot
+dotnet --version
 dotnet restore
 dotnet build -c Release
 dotnet publish -c Release -o ..\..\publish
 ```
 
 Expected result: build and publish succeed with no warnings or errors.
+
+- The published runtime configuration targets `net10.0` and includes .NET 10 framework entries.
+- Release output includes the app-local runtime; users do not need a separate .NET installation.
+- After a runtime upgrade, verify SVG icons, custom controls, DPI scaling, text input, clipboard, and PNG export using the published executable.
 
 ## Release Privacy Checks
 

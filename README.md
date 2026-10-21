@@ -89,11 +89,13 @@ FloatShot is intentionally small. It is not trying to replace full annotation su
 
 ## Requirements
 
-- Windows 10 or later.
+- Windows 10 or Windows 11 on a version supported by [.NET 10](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md).
 - x64 Windows for the packaged release build.
-- No .NET runtime installation is required for the release artifact because the app is published self-contained.
+- No .NET runtime installation is required for the release artifact because the app includes its .NET 10 runtime and is published self-contained.
 
 ## Build From Source
+
+Install the .NET 10 SDK on the development machine. `global.json` selects a stable .NET 10 SDK, including newer servicing and feature-band updates within .NET 10.
 
 ```powershell
 cd src\FloatShot
