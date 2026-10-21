@@ -125,6 +125,8 @@ Use the latest installer, or exit FloatShot from the tray menu before installing
 ## Usage
 
 - Drag the floating button to place it where you want.
+- Drag it to the left or right edge of its current monitor to dock as a narrow FloatShot tab. Click the tab once to capture directly, or drag it away from the edge to return to the full floating button.
+- Right-click the floating button or dock tab for Dock left, Dock right, and Undock. Docking side and display position are remembered; removing a display moves the button back onto an available screen.
 - Click the button for the default capture mode.
 - Use Settings to change save folder, default mode, hotkeys, clipboard behavior, floating button visibility, and startup behavior.
 - In region capture mode, drag to select an area, then resize or move the selection before choosing an action.

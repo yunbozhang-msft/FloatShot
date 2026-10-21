@@ -23,6 +23,8 @@ internal sealed class AnnotationToolbar : UserControl
     private readonly Dictionary<string, ToolbarButton> _actions = new();
     private AnnotationTool _tool;
     private AnnotationPreferences _preferences = new();
+    private Rectangle _toolsSurface;
+    private Rectangle _optionsSurface;
 
     public event Action<AnnotationTool>? ToolSelected;
     public event Action? PreferenceChanged;
@@ -30,11 +32,12 @@ internal sealed class AnnotationToolbar : UserControl
 
     public AnnotationToolbar()
     {
+        AutoScaleDimensions = new SizeF(96, 96);
         AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Surface;
         Padding = new Padding(6);
-        Font = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
-        _options.Font = new Font("Segoe UI", 8.25f, FontStyle.Regular, GraphicsUnit.Point);
+        Font = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
+        _options.Font = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
         SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
         Controls.Add(_tools); Controls.Add(_options);
         foreach (var (tool, icon, label) in new[]
@@ -53,9 +56,9 @@ internal sealed class AnnotationToolbar : UserControl
         AddAction("save", "save", "Save (S / Ctrl+S)"); AddAction("options", "chevron", "Save options");
         _actions["options"].Width = 20;
         _actions["options"].IconSize = 12;
-        var saveGroup = new SegmentedPanel { Size = new Size(53, 34), Padding = new Padding(2), Margin = new Padding(3, 1, 3, 1), WrapContents = false, BackColor = Surface };
-        _actions["save"].Size = new Size(31, 30); _actions["save"].Margin = Padding.Empty;
-        _actions["options"].Size = new Size(18, 30); _actions["options"].Margin = Padding.Empty; _actions["options"].SplitRight = true;
+        var saveGroup = new SegmentedPanel { Size = new Size(63, 40), Padding = new Padding(2), Margin = new Padding(3, 1, 3, 1), WrapContents = false, BackColor = Surface };
+        _actions["save"].Size = new Size(37, 36); _actions["save"].Margin = Padding.Empty;
+        _actions["options"].Size = new Size(22, 36); _actions["options"].Margin = Padding.Empty; _actions["options"].SplitRight = true;
         saveGroup.Controls.Add(_actions["save"]); saveGroup.Controls.Add(_actions["options"]); _tools.Controls.Add(saveGroup);
         _actions["copy"].IconColor = Fluent.Accent;
         AddAction("close", "dismiss", "Close (Esc)");
@@ -64,7 +67,7 @@ internal sealed class AnnotationToolbar : UserControl
 
     private ToolbarButton IconButton(string icon, string label)
     {
-        var button = new ToolbarButton { Size = new Size(34, 34), Margin = new Padding(1), Cursor = Cursors.Hand, AccessibleName = label.Split('(')[0].Trim(), IconName = icon };
+        var button = new ToolbarButton { Size = new Size(40, 40), Margin = new Padding(1), Cursor = Cursors.Hand, AccessibleName = label.Split('(')[0].Trim(), IconName = icon };
         _tips.SetToolTip(button, label);
         return button;
     }
@@ -77,7 +80,11 @@ internal sealed class AnnotationToolbar : UserControl
         if (action is "save" or "options") button.MouseUp += (_, args) => { if (args.Button == MouseButtons.Right) ActionRequested?.Invoke("options"); };
     }
 
-    private void Separator() => _tools.Controls.Add(new Panel { Width = 1, Height = 21, BackColor = Hairline, Margin = new Padding(6, 7, 6, 0) });
+    private void Separator() => _tools.Controls.Add(new Panel { Width = 1, Height = 24, BackColor = Hairline, Margin = new Padding(7, 9, 7, 0) });
+
+    private int Pixels(int logical) => Math.Max(1, (int)Math.Round(logical * DeviceDpi / 96f));
+    private Size ControlSize(int width, int height) => new(Pixels(width), Pixels(height));
+    private Padding ControlPadding(int left, int top, int right, int bottom) => new(left == 0 ? 0 : Pixels(left), top == 0 ? 0 : Pixels(top), right == 0 ? 0 : Pixels(right), bottom == 0 ? 0 : Pixels(bottom));
 
     public Rectangle ActionBounds(string action) => _actions[action].RectangleToScreen(_actions[action].ClientRectangle);
     public void SetSaveFolder(string folder) => _tips.SetToolTip(_actions["save"], $"Save to {folder}\nS / Ctrl+S");
@@ -124,7 +131,7 @@ internal sealed class AnnotationToolbar : UserControl
             }
             else if (tool == AnnotationTool.Text)
             {
-                var sizes = new ToolbarButton { Text = style.FontSize.ToString(), Size = new Size(49, 24), Margin = new Padding(8, 1, 3, 0), AccessibleName = "Font size", DropDown = true, ValueText = () => style.FontSize.ToString() };
+                var sizes = new ToolbarButton { Text = style.FontSize.ToString(), Size = ControlSize(60, 30), Margin = ControlPadding(10, 1, 4, 0), AccessibleName = "Font size", DropDown = true, ValueText = () => style.FontSize.ToString() };
                 sizes.Click += (_, _) =>
                 {
                     var menu = new ContextMenuStrip { Font = _options.Font, ShowImageMargin = false };
@@ -139,13 +146,13 @@ internal sealed class AnnotationToolbar : UserControl
                     menu.Show(sizes, new Point(0, sizes.Height + 3));
                 };
                 _optionPage.Controls.Add(sizes);
-                var bold = IconButton("bold", "Bold"); bold.Size = new Size(24, 24); bold.IconSize = 17; bold.ActiveWhen = () => style.Bold; bold.Indicator = false;
+                var bold = IconButton("bold", "Bold"); bold.Size = ControlSize(30, 30); bold.IconSize = 22; bold.ActiveWhen = () => style.Bold; bold.Indicator = false;
                 bold.Click += (_, _) => { style.Bold = !style.Bold; PreferenceChanged?.Invoke(); UpdateState(_tool, _preferences); };
                 _optionPage.Controls.Add(bold);
             }
             else if (tool != AnnotationTool.Rectangle || !style.Filled)
             {
-                _optionPage.Controls.Add(new Label { Text = "Width", AutoSize = true, ForeColor = Muted, Margin = new Padding(10, 5, 4, 0) });
+                _optionPage.Controls.Add(new Label { Text = "Width", AutoSize = true, UseCompatibleTextRendering = false, UseMnemonic = false, ForeColor = Muted, Margin = ControlPadding(12, 6, 5, 0) });
                 AddSlider(2, tool == AnnotationTool.Highlight ? 48 : 16, style.Width, "Width", value => style.Width = value);
             }
             }
@@ -159,29 +166,65 @@ internal sealed class AnnotationToolbar : UserControl
             _optionPage.Invalidate(true);
         }
         _options.ResumeLayout(true);
-        _options.Visible = tool != AnnotationTool.None;
-        int padding = Math.Max(6, (int)Math.Round(6 * DeviceDpi / 96f));
+        bool hasOptions = tool != AnnotationTool.None;
+        _options.Visible = hasOptions;
+        int padding = Pixels(8);
         _tools.Location = new Point(padding, padding);
         _tools.Size = _tools.PreferredSize;
-        _options.Location = new Point(padding, _tools.Bottom + 4);
+        _toolsSurface = new Rectangle(0, 0, _tools.Width + padding * 2, _tools.Bottom + padding);
+        int optionsTop = _toolsSurface.Bottom + Pixels(6);
+        _options.Location = new Point(padding, optionsTop + Pixels(4));
         _options.Size = _options.PreferredSize;
-        Size = new Size(Math.Max(_tools.PreferredSize.Width, _options.Visible ? _options.PreferredSize.Width : 0) + padding * 2, (_options.Visible ? _options.Bottom : _tools.Bottom) + padding);
-        if (Region is null || _regionSize != Size)
-        {
-            using var outline = Rounded(new RectangleF(0, 0, Width, Height), 7);
-            var previous = Region; Region = new Region(outline); previous?.Dispose(); _regionSize = Size;
-        }
+        _optionsSurface = hasOptions ? new Rectangle(0, optionsTop, _options.Width + padding * 2, _options.Height + Pixels(8)) : Rectangle.Empty;
+        Size = new Size(Math.Max(_toolsSurface.Width, _optionsSurface.Width), hasOptions ? _optionsSurface.Bottom : _toolsSurface.Bottom);
+        UpdateOutline();
         ResumeLayout(); Invalidate();
     }
 
-    private Size _regionSize;
+    public Rectangle Arrange(Rectangle available, int anchorRight, int below, int above)
+    {
+        int padding = Pixels(8);
+        int headerLeft = Math.Clamp(anchorRight - _toolsSurface.Width, available.Left + padding, Math.Max(available.Left + padding, available.Right - _toolsSurface.Width - padding));
+        int optionsLeft = _optionsSurface.IsEmpty ? headerLeft : Math.Clamp(headerLeft, available.Left + padding, Math.Max(available.Left + padding, available.Right - _optionsSurface.Width - padding));
+        int left = Math.Min(headerLeft, optionsLeft);
+        int right = Math.Max(headerLeft + _toolsSurface.Width, _optionsSurface.IsEmpty ? headerLeft : optionsLeft + _optionsSurface.Width);
+        int reservedHeight = Math.Max(Height, _toolsSurface.Height + Pixels(64));
+        int top = below;
+        if (top + reservedHeight > available.Bottom - padding) top = above - reservedHeight;
+        top = Math.Clamp(top, available.Top + padding, Math.Max(available.Top + padding, available.Bottom - reservedHeight - padding));
+        SuspendLayout();
+        _toolsSurface.X = headerLeft - left;
+        _tools.Location = new Point(_toolsSurface.Left + padding, _tools.Location.Y);
+        if (!_optionsSurface.IsEmpty)
+        {
+            _optionsSurface.X = optionsLeft - left;
+            _options.Location = new Point(_optionsSurface.Left + padding, _options.Location.Y);
+        }
+        Size = new Size(right - left, Height);
+        UpdateOutline(); ResumeLayout(); Invalidate();
+        return new Rectangle(left, top, Width, Height);
+    }
+
+    private void UpdateOutline()
+    {
+        using (var toolsOutline = Rounded(_toolsSurface, Pixels(7)))
+        {
+            var shape = new Region(toolsOutline);
+            if (!_optionsSurface.IsEmpty)
+            {
+                using var optionsOutline = Rounded(_optionsSurface, Pixels(7));
+                shape.Union(optionsOutline);
+            }
+            var previous = Region; Region = shape; previous?.Dispose();
+        }
+    }
 
     private void AddChoices(params (string Label, Func<bool> Selected, Action Change)[] choices)
     {
-        var group = new SegmentedPanel { AutoSize = true, WrapContents = false, Padding = new Padding(2), Margin = new Padding(9, 0, 3, 0), BackColor = Color.FromArgb(245, 245, 245) };
+        var group = new SegmentedPanel { AutoSize = true, WrapContents = false, Padding = ControlPadding(2, 2, 2, 2), Margin = ControlPadding(12, 0, 4, 0), BackColor = Color.FromArgb(245, 245, 245) };
         foreach (var choice in choices)
         {
-            var button = new ToolbarButton { Text = choice.Label, Size = new Size(choice.Label.Length > 7 ? 66 : 53, 21), Margin = Padding.Empty, ActiveWhen = choice.Selected, Segment = true, Indicator = false, AccessibleName = choice.Label };
+            var button = new ToolbarButton { Text = choice.Label, Size = ControlSize(choice.Label.Length > 7 ? 80 : 64, 28), Margin = Padding.Empty, ActiveWhen = choice.Selected, Segment = true, Indicator = false, AccessibleName = choice.Label };
             button.Click += (_, _) => { choice.Change(); PreferenceChanged?.Invoke(); UpdateState(_tool, _preferences); };
             group.Controls.Add(button);
         }
@@ -190,9 +233,9 @@ internal sealed class AnnotationToolbar : UserControl
 
     private void AddSlider(int minimum, int maximum, int value, string label, Action<int> change)
     {
-        var slider = new ToolbarSlider { Minimum = minimum, Maximum = maximum, Value = Math.Clamp(value, minimum, maximum), Size = new Size(label == "Mosaic strength" ? 100 : 66, 24), Margin = new Padding(3, 0, 2, 0), AccessibleName = label, Step = label == "Mosaic strength" ? 4 : 1 };
+        var slider = new ToolbarSlider { Minimum = minimum, Maximum = maximum, Value = Math.Clamp(value, minimum, maximum), Size = ControlSize(label == "Mosaic strength" ? 120 : 84, 30), Margin = ControlPadding(4, 0, 3, 0), AccessibleName = label, Step = label == "Mosaic strength" ? 4 : 1 };
         _tips.SetToolTip(slider, label);
-        Label? output = label == "Mosaic strength" ? null : new Label { Text = slider.Value + " px", AutoSize = false, Size = new Size(34, 24), TextAlign = ContentAlignment.MiddleLeft, ForeColor = Muted, Margin = new Padding(3, 0, 2, 0) };
+        Label? output = label == "Mosaic strength" ? null : new Label { Text = slider.Value + " px", AutoSize = false, UseCompatibleTextRendering = false, UseMnemonic = false, Size = ControlSize(44, 30), TextAlign = ContentAlignment.MiddleLeft, ForeColor = Muted, Margin = ControlPadding(4, 0, 3, 0) };
         slider.ValueChanged += (_, _) => { if (output is not null) output.Text = slider.Value + " px"; if (_updatingOptions) return; change(slider.Value); PreferenceChanged?.Invoke(); };
         _optionPage.Controls.Add(slider);
         if (output is not null) _optionPage.Controls.Add(output);
@@ -202,7 +245,7 @@ internal sealed class AnnotationToolbar : UserControl
     {
         foreach (var color in new[] { Color.FromArgb(230, 45, 45), Color.Yellow, Color.FromArgb(22, 163, 74), Fluent.Accent, Color.Black, Color.White })
         {
-            var swatch = new ToolbarButton { Size = new Size(21, 24), Margin = new Padding(1, 0, 1, 0), AccessibleName = color.Name, Swatch = color, IsSwatchSelected = () => color.ToArgb() == style.ColorArgb };
+            var swatch = new ToolbarButton { Size = ControlSize(28, 30), Margin = ControlPadding(1, 0, 1, 0), AccessibleName = color.Name, Swatch = color, IsSwatchSelected = () => color.ToArgb() == style.ColorArgb };
             swatch.Click += (_, _) => { style.ColorArgb = color.ToArgb(); PreferenceChanged?.Invoke(); _options.Invalidate(true); };
             _tips.SetToolTip(swatch, color == Color.Yellow ? "Yellow" : color == Color.White ? "White" : color == Color.Black ? "Black" : color == Fluent.Accent ? "Blue" : color.G > color.R ? "Green" : "Red");
             _optionPage.Controls.Add(swatch);
@@ -214,9 +257,12 @@ internal sealed class AnnotationToolbar : UserControl
         base.OnPaint(args);
         args.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         using var border = new Pen(Color.FromArgb(220, 220, 220));
-        using var shape = Rounded(new RectangleF(.5f, .5f, Width - 1, Height - 1), 7);
-        args.Graphics.DrawPath(border, shape);
-        if (_options.Visible) args.Graphics.DrawLine(border, 1, _options.Top - 3, Width - 2, _options.Top - 3);
+        foreach (var surface in new[] { _toolsSurface, _optionsSurface })
+        {
+            if (surface.IsEmpty) continue;
+            using var shape = Rounded(new RectangleF(surface.X + .5f, surface.Y + .5f, surface.Width - 1, surface.Height - 1), Pixels(7));
+            args.Graphics.DrawPath(border, shape);
+        }
     }
 
     protected override void Dispose(bool disposing) { if (disposing) { _tips.Dispose(); _options.Font.Dispose(); } base.Dispose(disposing); }
@@ -233,7 +279,11 @@ internal sealed class AnnotationToolbar : UserControl
 
     private class BufferedFlowPanel : FlowLayoutPanel
     {
-        public BufferedFlowPanel() => SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+        public BufferedFlowPanel()
+        {
+            AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            SetStyle(ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
+        }
     }
 
     [DllImport("user32.dll")]
@@ -283,7 +333,7 @@ internal sealed class AnnotationToolbar : UserControl
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public Color IconColor { get; set; } = Ink;
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public int IconSize { get; set; } = 20;
+        public int IconSize { get; set; } = 24;
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool Active { get; set; }
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
@@ -316,6 +366,14 @@ internal sealed class AnnotationToolbar : UserControl
         protected override void OnMouseDown(MouseEventArgs args) { _pressed = args.Button == MouseButtons.Left; Invalidate(); base.OnMouseDown(args); }
         protected override void OnMouseUp(MouseEventArgs args) { _pressed = false; Invalidate(); base.OnMouseUp(args); }
 
+        private int Pixels(int logical) => Math.Max(1, (int)Math.Round(logical * DeviceDpi / 96f));
+        private void DrawIcon(Graphics graphics, string name, Rectangle bounds, Color color, int logicalSize)
+        {
+            int size = Math.Min(Pixels(logicalSize), Math.Min(bounds.Width, bounds.Height));
+            var image = FluentIcon.Get(name, size, color);
+            graphics.DrawImageUnscaled(image, bounds.Left + (bounds.Width - size) / 2, bounds.Top + (bounds.Height - size) / 2);
+        }
+
         protected override void OnPaint(PaintEventArgs args)
         {
             var graphics = args.Graphics; graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -324,11 +382,11 @@ internal sealed class AnnotationToolbar : UserControl
             if (Swatch is { } color)
             {
                 float centerX = Width / 2f, centerY = Height / 2f;
-                using var fill = new SolidBrush(color); using var white = new Pen(Surface, 2);
-                using var edge = new Pen(IsSwatchSelected?.Invoke() == true ? Ink : Color.FromArgb(200, 200, 200), IsSwatchSelected?.Invoke() == true ? 1.5f : 1);
-                graphics.FillEllipse(fill, centerX - 6, centerY - 6, 12, 12);
-                graphics.DrawEllipse(white, centerX - 7, centerY - 7, 14, 14);
-                graphics.DrawEllipse(edge, centerX - 8, centerY - 8, 16, 16); return;
+                using var fill = new SolidBrush(color); using var white = new Pen(Surface, Pixels(2));
+                using var edge = new Pen(IsSwatchSelected?.Invoke() == true ? Ink : Color.FromArgb(170, 170, 170), (IsSwatchSelected?.Invoke() == true ? 1.5f : 1) * DeviceDpi / 96f);
+                graphics.FillEllipse(fill, centerX - Pixels(9), centerY - Pixels(9), Pixels(18), Pixels(18));
+                graphics.DrawEllipse(white, centerX - Pixels(10), centerY - Pixels(10), Pixels(20), Pixels(20));
+                graphics.DrawEllipse(edge, centerX - Pixels(11), centerY - Pixels(11), Pixels(22), Pixels(22)); return;
             }
             var bounds = new RectangleF(1, 1, Width - 2, Height - 2);
             using var background = new SolidBrush(Segment && active ? Surface : active ? AccentSoft : _pressed ? Color.FromArgb(232, 232, 232) : _hovered ? Color.FromArgb(245, 245, 245) : Segment ? Parent?.BackColor ?? Surface : Surface);
@@ -340,11 +398,11 @@ internal sealed class AnnotationToolbar : UserControl
             }
             if (SplitRight) { using var divider = new Pen(Hairline); graphics.DrawLine(divider, 0, 3, 0, Height - 3); }
             Color foreground = !Enabled ? Color.FromArgb(185, 185, 185) : active ? Accent : IconName is null ? Ink : IconColor;
-            if (IconName is not null) FluentIcon.Draw(graphics, IconName, ClientRectangle, foreground, IconSize);
+            if (IconName is not null) DrawIcon(graphics, IconName, ClientRectangle, foreground, IconSize);
             else
             {
                 var textBounds = ClientRectangle;
-                if (DropDown) { textBounds.Width -= 16; FluentIcon.Draw(graphics, "chevron", new Rectangle(Width - 20, 0, 16, Height), Muted, 12); }
+                if (DropDown) { textBounds.Width -= Pixels(20); DrawIcon(graphics, "chevron", new Rectangle(Width - Pixels(24), 0, Pixels(20), Height), Muted, 14); }
                 TextRenderer.DrawText(graphics, ValueText?.Invoke() ?? Text, Font, textBounds, foreground, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
             if (active && Indicator && !Segment)
@@ -374,7 +432,8 @@ internal sealed class AnnotationToolbar : UserControl
             BackColor = Surface; Cursor = Cursors.Hand; AccessibleRole = AccessibleRole.Slider; TabStop = true;
         }
 
-        private void SetFromMouse(int position) => Value = Minimum + (int)Math.Round(Math.Clamp((position - 7f) / Math.Max(1, Width - 14), 0, 1) * (Maximum - Minimum) / Step) * Step;
+        private int Pixels(int logical) => Math.Max(1, (int)Math.Round(logical * DeviceDpi / 96f));
+        private void SetFromMouse(int position) => Value = Minimum + (int)Math.Round(Math.Clamp((position - (float)Pixels(8)) / Math.Max(1, Width - Pixels(16)), 0, 1) * (Maximum - Minimum) / Step) * Step;
         protected override bool IsInputKey(Keys keyData) => (keyData & Keys.KeyCode) is Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Home or Keys.End || base.IsInputKey(keyData);
         protected override void OnMouseDown(MouseEventArgs args) { if (args.Button == MouseButtons.Left) { Capture = true; Focus(); SetFromMouse(args.X); } base.OnMouseDown(args); }
         protected override void OnMouseMove(MouseEventArgs args) { if (Capture && args.Button == MouseButtons.Left) SetFromMouse(args.X); base.OnMouseMove(args); }
@@ -392,14 +451,14 @@ internal sealed class AnnotationToolbar : UserControl
         protected override void OnPaint(PaintEventArgs args)
         {
             var graphics = args.Graphics; graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            float centerY = Height / 2f, thumb = 7 + (Width - 14) * (Value - Minimum) / (float)Math.Max(1, Maximum - Minimum);
-            using var track = new Pen(Color.FromArgb(228, 228, 228), 3) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-            using var fill = new Pen(Accent, 3) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-            graphics.DrawLine(track, 7, centerY, Width - 7, centerY); graphics.DrawLine(fill, 7, centerY, thumb, centerY);
+            float centerY = Height / 2f, thumb = Pixels(8) + (Width - Pixels(16)) * (Value - Minimum) / (float)Math.Max(1, Maximum - Minimum);
+            using var track = new Pen(Color.FromArgb(210, 210, 210), Pixels(3)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            using var fill = new Pen(Accent, Pixels(3)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            graphics.DrawLine(track, Pixels(8), centerY, Width - Pixels(8), centerY); graphics.DrawLine(fill, Pixels(8), centerY, thumb, centerY);
             using var halo = new SolidBrush(Color.FromArgb(238, 238, 238)); using var thumbBrush = new SolidBrush(Accent);
-            graphics.FillEllipse(halo, thumb - 7, centerY - 6, 14, 14);
-            graphics.FillEllipse(Brushes.White, thumb - 6, centerY - 6, 12, 12);
-            graphics.FillEllipse(thumbBrush, thumb - 4, centerY - 4, 8, 8);
+            graphics.FillEllipse(halo, thumb - Pixels(8), centerY - Pixels(7), Pixels(16), Pixels(16));
+            graphics.FillEllipse(Brushes.White, thumb - Pixels(7), centerY - Pixels(7), Pixels(14), Pixels(14));
+            graphics.FillEllipse(thumbBrush, thumb - Pixels(5), centerY - Pixels(5), Pixels(10), Pixels(10));
         }
     }
 }
@@ -411,7 +470,7 @@ internal sealed class AnnotationEditor : IDisposable
     private readonly Func<Rectangle> _sourceBounds;
     private readonly Settings _settings;
     private Annotation? _preview;
-    private TextBox? _textBox;
+    private ScreenshotTextBox? _textBox;
     private Font? _textFont;
     private PointF _textAnchor;
     private int _editingIndex = -1;
@@ -536,7 +595,7 @@ internal sealed class AnnotationEditor : IDisposable
     {
         _editingIndex = index; _textAnchor = anchor;
         if (index >= 0) { _textAnchor = Document[index].Points[0]; _settings.Annotation.Text = Document[index].Style.Copy(); }
-        _textBox = new TextBox { Multiline = true, AcceptsReturn = true, BorderStyle = BorderStyle.FixedSingle, Text = index >= 0 ? Document[index].Text : "", AccessibleName = "Annotation text" };
+        _textBox = new ScreenshotTextBox(Document.Render(_sourceBounds(), excluded: index)) { Multiline = true, AcceptsReturn = true, BorderStyle = BorderStyle.FixedSingle, Text = index >= 0 ? Document[index].Text : "", AccessibleName = "Annotation text" };
         _textBox.TextChanged += (_, _) => UpdateTextBox();
         _host.Controls.Add(_textBox); UpdateTextBox(); Toolbar.UpdateState(Tool, _settings.Annotation);
         _textBox.BringToFront(); _textBox.Focus(); _textBox.Select(_textBox.TextLength, 0); Notify();
@@ -558,6 +617,7 @@ internal sealed class AnnotationEditor : IDisposable
         int height = Math.Min(display.Height, Math.Max(_textBox.Font.Height + 10, size.Height + 10));
         top = Math.Min(top, display.Bottom - height); _textAnchor.Y = bounds.Top + (top - display.Top) / Zoom;
         _textBox.Bounds = new Rectangle(left, top, width, height);
+        _textBox.UpdateBackground(display);
     }
 
     public void CommitText()
@@ -611,9 +671,73 @@ internal sealed class AnnotationEditor : IDisposable
     public Bitmap Export() { CommitText(); return Document.Render(_sourceBounds()); }
     public void Undo() { CommitText(); Document.Undo(); RefreshHistory(); Notify(); }
     public void Redo() { CommitText(); Document.Redo(); RefreshHistory(); Notify(); }
-    public void BoundsChanged() { UpdateTextBox(); Notify(); }
+    public void BoundsChanged() { _textBox?.ReplaceBackground(Document.Render(_sourceBounds(), excluded: _editingIndex)); UpdateTextBox(); Notify(); }
     public void CancelStroke() { _preview = null; _movingIndex = -1; _moveOriginal = null; _host.Capture = false; }
     private void RefreshHistory() => Toolbar.SetHistory(Document.CanUndo, Document.CanRedo);
     private void Notify() { _host.Invalidate(); Changed?.Invoke(); }
     public void Dispose() { CloseTextBox(); Document.Dispose(); Toolbar.Dispose(); }
+
+    private sealed class ScreenshotTextBox(Bitmap background) : TextBox
+    {
+        private Bitmap _background = background;
+        private IntPtr _brush;
+        private BackgroundWindow? _backgroundWindow;
+        private Rectangle _backgroundBounds;
+        private Size _backgroundSize;
+
+        public void ReplaceBackground(Bitmap image)
+        {
+            _background.Dispose(); _background = image;
+            if (_brush != IntPtr.Zero) { DeleteObject(_brush); _brush = IntPtr.Zero; }
+        }
+
+        public void UpdateBackground(Rectangle display)
+        {
+            var origin = Parent!.PointToClient(PointToScreen(Point.Empty));
+            var bounds = new Rectangle(display.Left - origin.X, display.Top - origin.Y, display.Width, display.Height);
+            if (_brush != IntPtr.Zero && _backgroundBounds == bounds && _backgroundSize == ClientSize) return;
+            using var image = new Bitmap(Math.Max(1, ClientSize.Width), Math.Max(1, ClientSize.Height));
+            using (var graphics = Graphics.FromImage(image)) graphics.DrawImage(_background, bounds);
+            var bitmap = image.GetHbitmap();
+            IntPtr brush;
+            try { brush = CreatePatternBrush(bitmap); }
+            finally { DeleteObject(bitmap); }
+            if (_brush != IntPtr.Zero) DeleteObject(_brush);
+            _brush = brush; _backgroundBounds = bounds; _backgroundSize = ClientSize;
+            _backgroundWindow ??= new BackgroundWindow(this);
+            Invalidate();
+        }
+
+        private sealed class BackgroundWindow : NativeWindow
+        {
+            private readonly ScreenshotTextBox _editor;
+            public BackgroundWindow(ScreenshotTextBox editor) { _editor = editor; AssignHandle(editor.Parent!.Handle); }
+
+            protected override void WndProc(ref Message message)
+            {
+                if (_editor._brush != IntPtr.Zero && message.LParam == _editor.Handle && message.Msg is 0x0133 or 0x0138)
+                {
+                    SetBkMode(message.WParam, 1);
+                    var color = _editor.ForeColor;
+                    SetTextColor(message.WParam, (uint)(color.R | color.G << 8 | color.B << 16));
+                    message.Result = _editor._brush;
+                    return;
+                }
+                base.WndProc(ref message);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _backgroundWindow?.ReleaseHandle();
+            base.Dispose(disposing);
+            if (disposing) _background.Dispose();
+            if (_brush != IntPtr.Zero) { DeleteObject(_brush); _brush = IntPtr.Zero; }
+        }
+
+        [DllImport("gdi32.dll")] private static extern IntPtr CreatePatternBrush(IntPtr bitmap);
+        [DllImport("gdi32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool DeleteObject(IntPtr handle);
+        [DllImport("gdi32.dll")] private static extern int SetBkMode(IntPtr deviceContext, int mode);
+        [DllImport("gdi32.dll")] private static extern uint SetTextColor(IntPtr deviceContext, uint color);
+    }
 }

@@ -47,6 +47,7 @@ internal static class RegionCapture
         private bool _selected;
         private SelectionDragMode _dragMode;
         private ResizeEdge _resizeEdge;
+        private Rectangle _lastToolbarBounds;
 
         public Rectangle SelectedScreenRect { get; private set; }
         public RegionAction Action { get; private set; } = RegionAction.Cancel;
@@ -127,12 +128,10 @@ internal static class RegionCapture
         {
             var toolbar = _editor.Toolbar;
             var monitor = RectangleToClient(Screen.FromPoint(PointToScreen(new Point(_sel.Right - 1, _sel.Bottom - 1))).Bounds);
-            int left = Math.Clamp(_sel.Right - toolbar.Width, monitor.Left + 8, Math.Max(monitor.Left + 8, monitor.Right - toolbar.Width - 8));
-            int top = _sel.Bottom + 10;
-            if (top + toolbar.Height > monitor.Bottom) top = _sel.Top - toolbar.Height - 10;
-            if (top < monitor.Top) top = _sel.Bottom - toolbar.Height - 10;
-            top = Math.Clamp(top, monitor.Top + 8, Math.Max(monitor.Top + 8, monitor.Bottom - toolbar.Height - 8));
-            toolbar.Location = new Point(left, top);
+            toolbar.Location = toolbar.Arrange(monitor, _sel.Right, _sel.Bottom + 10, _sel.Top - 10).Location;
+            var exposed = _lastToolbarBounds.IsEmpty ? toolbar.Bounds : Rectangle.Union(_lastToolbarBounds, toolbar.Bounds);
+            _lastToolbarBounds = toolbar.Bounds;
+            Invalidate(exposed);
         }
 
         protected override void OnMouseDown(MouseEventArgs args)

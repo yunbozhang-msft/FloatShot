@@ -48,7 +48,7 @@ internal sealed class TrayContext : ApplicationContext
             ToolTipIcon.Info);
     }
 
-    private ContextMenuStrip BuildTrayMenu()
+    private ContextMenuStrip BuildTrayMenu(bool includeDocking = false)
     {
         var menu = new ContextMenuStrip();
 
@@ -67,6 +67,17 @@ internal sealed class TrayContext : ApplicationContext
             else HideButton();
         };
         menu.Items.Add(miButton);
+
+        if (includeDocking && _button is not null)
+        {
+            menu.Items.Add(new ToolStripSeparator());
+            foreach (var (label, side) in new[] { ("Dock left", FloatingDockSide.Left), ("Dock right", FloatingDockSide.Right), ("Undock", FloatingDockSide.None) })
+            {
+                var item = new ToolStripMenuItem(label) { Checked = _button.DockSide == side };
+                item.Click += (_, _) => _button?.DockTo(side); menu.Items.Add(item);
+            }
+            menu.Items.Add(new ToolStripSeparator());
+        }
 
         AddMenuItem(menu, "Open save folder",   (_, _) => OpenFolder());
         AddMenuItem(menu, "Settings...",        (_, _) => OpenSettings());
@@ -104,7 +115,7 @@ internal sealed class TrayContext : ApplicationContext
     {
         if (_button is null || _button.IsDisposed) ShowButton();
         else if (!_button.Visible) _button.Visible = true;
-        if (_button is not null) WindowOps.EnsureTopMost(_button.Handle);
+        if (_button is not null) { _button.Reveal(); WindowOps.EnsureTopMost(_button.Handle); }
     }
 
     private void ShowButton()
@@ -113,18 +124,18 @@ internal sealed class TrayContext : ApplicationContext
         _button = new FloatingButton();
         _button.CaptureClicked += (_, _) => DoCapture(_settings.DefaultMode);
         _button.RightClicked   += (_, _) => ShowButtonMenu();
-        _button.Move           += (_, _) => SaveButtonPosition();
+        _button.PositionCommitted += (_, _) => SaveButtonPosition();
 
         // 初始位置: 已有保存的就用, 否则放主屏右下偏上
         var wa = Screen.PrimaryScreen!.WorkingArea;
         var defaultLoc = new Point(wa.Right - 80, wa.Bottom - 200);
-        var loc = (_settings.ButtonX < 0 || _settings.ButtonY < 0)
+        var loc = (_settings.ButtonX == -1 && _settings.ButtonY == -1)
             ? defaultLoc
             : new Point(_settings.ButtonX, _settings.ButtonY);
         // 防止上次保存的位置已不在任何屏幕上
         var screens = Screen.AllScreens;
         if (!screens.Any(s => s.Bounds.Contains(loc))) loc = defaultLoc;
-        _button.Location = loc;
+        _button.RestorePosition(loc, _settings.ButtonDockSide, _settings.ButtonScreenName);
 
         _button.Show();
     }
@@ -137,14 +148,23 @@ internal sealed class TrayContext : ApplicationContext
     private void SaveButtonPosition()
     {
         if (_button is null) return;
-        _settings.ButtonX = _button.Location.X;
-        _settings.ButtonY = _button.Location.Y;
+        _settings.ButtonX = _button.SavedLocation.X;
+        _settings.ButtonY = _button.SavedLocation.Y;
+        _settings.ButtonDockSide = _button.DockSide;
+        _settings.ButtonScreenName = _button.DockScreenName;
         _settings.Save();
     }
 
     private void ShowButtonMenu()
     {
-        var menu = BuildTrayMenu();
+        var menu = BuildTrayMenu(includeDocking: true);
+        _button?.HoldOpen(true);
+        menu.Closed += (_, _) =>
+        {
+            _button?.HoldOpen(false);
+            if (_button is { IsDisposed: false, IsHandleCreated: true }) _button.BeginInvoke((Action)menu.Dispose);
+            else menu.Dispose();
+        };
         menu.Show(Cursor.Position);
     }
 

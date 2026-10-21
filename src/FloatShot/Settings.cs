@@ -31,6 +31,10 @@ internal sealed class Settings
 
     public int ButtonY { get; set; } = -1;
 
+    public FloatingDockSide ButtonDockSide { get; set; }
+
+    public string? ButtonScreenName { get; set; }
+
     public bool CopyToClipboard { get; set; } = true;
 
     public bool OpenFolderAfterCapture { get; set; } = false;
@@ -92,3 +96,5 @@ internal enum CaptureMode
     PrimaryScreen,
     ActiveWindow
 }
+
+internal enum FloatingDockSide { None, Left, Right }

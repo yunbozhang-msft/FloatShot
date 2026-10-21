@@ -33,6 +33,8 @@ internal sealed class PinnedImage : Form
         _editor = new AnnotationEditor(this, bitmap, () => ImageBounds, () => new Rectangle(Point.Empty, bitmap.Size), _settings);
         _toolbarWindow = new ToolbarWindow { FormBorderStyle = FormBorderStyle.None, StartPosition = FormStartPosition.Manual, ShowInTaskbar = false, TopMost = true, KeyPreview = true, Text = "FloatShot Annotation" };
         _toolbarWindow.Controls.Add(_editor.Toolbar);
+        _editor.Toolbar.RegionChanged += (_, _) => UpdateToolbarRegion();
+        UpdateToolbarRegion();
         _toolbarWindow.KeyDown += (_, args) => OnKeyDown(args);
         _editor.Changed += PositionToolbar;
         _editor.ActionRequested += action =>
@@ -165,15 +167,16 @@ internal sealed class PinnedImage : Form
     }
 
     private void ShowToolbar() { PositionToolbar(); if (!_toolbarWindow.Visible) _toolbarWindow.Show(this); }
+    private void UpdateToolbarRegion()
+    {
+        var previous = _toolbarWindow.Region;
+        _toolbarWindow.Region = _editor.Toolbar.Region?.Clone();
+        previous?.Dispose();
+    }
     private void PositionToolbar()
     {
-        _toolbarWindow.ClientSize = _editor.Toolbar.Size;
         var monitor = Screen.FromControl(this).WorkingArea;
-        int left = Math.Clamp(Right - _toolbarWindow.Width, monitor.Left + 8, Math.Max(monitor.Left + 8, monitor.Right - _toolbarWindow.Width - 8));
-        int top = Bottom + 8;
-        if (top + _toolbarWindow.Height > monitor.Bottom) top = Top - _toolbarWindow.Height - 8;
-        top = Math.Clamp(top, monitor.Top + 8, Math.Max(monitor.Top + 8, monitor.Bottom - _toolbarWindow.Height - 8));
-        _toolbarWindow.Location = new Point(left, top);
+        _toolbarWindow.Bounds = _editor.Toolbar.Arrange(monitor, Right, Bottom + 8, Top - 8);
     }
 
     private void CopyToClipboard()
