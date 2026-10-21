@@ -1,468 +1,234 @@
-using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Windows.Forms;
 
 namespace FloatShot;
 
-/// <summary>
-/// 屏幕贴图便签 (PixPin 同款) — Win11 Fluent 风格。
-/// - layered + toolwindow + topmost (跨虚拟桌面 / W365 投影可见)
-/// - 1px 灰描边 + 淡阴影
-/// - 左键拖动, 滚轮缩放 (50%-400%), 双击/Esc 关闭
-/// - Mark mode: draw red rectangles to highlight important areas
-/// - 右键菜单: Copy / Save as / Reset zoom / Close
-/// </summary>
 internal sealed class PinnedImage : Form
 {
     private static readonly List<PinnedImage> _all = new();
-
-    private const int ShadowPad = 4;   // 透明区给阴影留位
-
+    private const int ShadowPad = 4;
     private readonly Bitmap _original;
-    private readonly List<RectangleF> _marks = new();
-    private float _zoom = 1.0f;
+    private readonly Settings _settings;
+    private readonly AnnotationEditor _editor;
+    private readonly Form _toolbarWindow;
+    private float _zoom = 1;
     private bool _dragging;
-    private bool _markMode;
-    private bool _marking;
     private Point _dragStartScreen;
     private Point _formStart;
-    private Point _markStart;
-    private RectangleF? _previewMark;
 
-    public static void ShowAt(Bitmap bmp, Point screenLocation)
+    public static void ShowAt(Bitmap bitmap, Point screenLocation, Settings? settings = null)
     {
-        var p = new PinnedImage(bmp);
-        // screenLocation 是图像左上角的屏幕坐标; 减掉 shadowPad 让图像本身贴在原位
-        p.Location = new Point(screenLocation.X - ShadowPad, screenLocation.Y - ShadowPad);
-        p.Show();
-        _all.Add(p);
-        p.FormClosed += (_, _) => _all.Remove(p);
+        var image = new PinnedImage(bitmap, settings) { Location = new Point(screenLocation.X - ShadowPad, screenLocation.Y - ShadowPad) };
+        _all.Add(image); image.FormClosed += (_, _) => _all.Remove(image); image.Show();
     }
 
-    private PinnedImage(Bitmap bmp)
+    private PinnedImage(Bitmap bitmap, Settings? settings = null)
     {
-        _original = bmp;
-        FormBorderStyle = FormBorderStyle.None;
-        StartPosition   = FormStartPosition.Manual;
-        ShowInTaskbar   = false;
-        TopMost         = true;
-        DoubleBuffered  = true;
-        Cursor          = Cursors.SizeAll;
-        BackColor       = Color.Magenta;
-        TransparencyKey = Color.Magenta;
-        Icon            = AppIcon.Get();
-        Text            = "FloatShot Pin";
-        Size            = new Size(bmp.Width + ShadowPad * 2, bmp.Height + ShadowPad * 2);
+        _original = bitmap; _settings = settings ?? Settings.Load();
+        FormBorderStyle = FormBorderStyle.None; StartPosition = FormStartPosition.Manual;
+        ShowInTaskbar = false; TopMost = true; DoubleBuffered = true; KeyPreview = true;
+        Cursor = Cursors.SizeAll; BackColor = Color.Magenta; TransparencyKey = Color.Magenta;
+        Icon = AppIcon.Get(); Text = "FloatShot Pin";
+        Size = new Size(bitmap.Width + ShadowPad * 2, bitmap.Height + ShadowPad * 2);
+        _editor = new AnnotationEditor(this, bitmap, () => ImageBounds, () => new Rectangle(Point.Empty, bitmap.Size), _settings);
+        _toolbarWindow = new ToolbarWindow { FormBorderStyle = FormBorderStyle.None, StartPosition = FormStartPosition.Manual, ShowInTaskbar = false, TopMost = true, KeyPreview = true, Text = "FloatShot Annotation" };
+        _toolbarWindow.Controls.Add(_editor.Toolbar);
+        _toolbarWindow.KeyDown += (_, args) => OnKeyDown(args);
+        _editor.Changed += PositionToolbar;
+        _editor.ActionRequested += action =>
+        {
+            switch (action)
+            {
+                case "copy": CopyToClipboard(); break;
+                case "save": Save(false); break;
+                case "options": ShowSaveMenu(); break;
+                case "close": Close(); break;
+                case "pin": ToggleToolbar(); break;
+            }
+        };
+        _editor.Toolbar.SetSaveFolder(_settings.SaveFolder);
         ContextMenuStrip = BuildMenu();
-        KeyPreview      = true;
-        TabStop         = true;
+        LocationChanged += (_, _) => PositionToolbar();
         SetStyle(ControlStyles.Selectable, true);
     }
 
+    private Rectangle ImageBounds => new(ShadowPad, ShadowPad, Math.Max(1, (int)(_original.Width * _zoom)), Math.Max(1, (int)(_original.Height * _zoom)));
     protected override CreateParams CreateParams
     {
-        get
-        {
-            var cp = base.CreateParams;
-            cp.ExStyle |= 0x00000008 | 0x00000080;
-            return cp;
-        }
+        get { var parameters = base.CreateParams; parameters.ExStyle |= 0x00000008 | 0x00000080; return parameters; }
     }
 
     private ContextMenuStrip BuildMenu()
     {
-        // Win11 light theme menu — generous padding, real icons, no cramped look
-        var menu = new ContextMenuStrip
-        {
-            Renderer = new LightMenuRenderer(),
-            BackColor = Color.White,
-            ShowImageMargin = true,
-            ImageScalingSize = new Size(18, 18),
-            Font = new Font("Segoe UI Variable", 10f),
-            Padding = new Padding(4)
-        };
-
-        AddItem(menu, FluentIcon.Copy,       "Copy",        Keys.Control | Keys.C, (_, _) => CopyToClipboard());
-        AddItem(menu, FluentIcon.Save,       "Save as...",  Keys.Control | Keys.S, (_, _) => SaveAs());
+        var menu = new ContextMenuStrip { Font = new Font("Segoe UI", 10), ImageScalingSize = new Size(18, 18) };
+        AddItem(menu, "text", "Annotate", "Space", ToggleToolbar);
         menu.Items.Add(new ToolStripSeparator());
-        AddItem(menu, FluentIcon.Info,       "Mark rectangle", Keys.M,             (_, _) => ToggleMarkMode());
-        AddItem(menu, FluentIcon.ArrowReset, "Undo mark",      Keys.Control | Keys.Z, (_, _) => UndoMark());
-        AddItem(menu, FluentIcon.Dismiss,    "Clear marks",    Keys.None,          (_, _) => ClearMarks());
+        AddItem(menu, "copy", "Copy", "Ctrl+C", CopyToClipboard);
+        AddItem(menu, "save", "Save", "Ctrl+S", () => Save(false));
+        AddItem(menu, "folder", "Save as...", "Ctrl+Shift+S", () => Save(true));
         menu.Items.Add(new ToolStripSeparator());
-        AddItem(menu, FluentIcon.ArrowReset, "Reset zoom",  Keys.None,             (_, _) => { _zoom = 1.0f; ApplyZoom(); });
-        AddItem(menu, FluentIcon.ZoomIn,     "Zoom in",     Keys.None,             (_, _) => { _zoom = Math.Min(4.0f, _zoom + 0.1f); ApplyZoom(); });
-        AddItem(menu, FluentIcon.ZoomOut,    "Zoom out",    Keys.None,             (_, _) => { _zoom = Math.Max(0.5f, _zoom - 0.1f); ApplyZoom(); });
+        AddItem(menu, "undo", "Undo", "Ctrl+Z", _editor.Undo);
+        AddItem(menu, "redo", "Redo", "Ctrl+Y", _editor.Redo);
         menu.Items.Add(new ToolStripSeparator());
-        AddItem(menu, FluentIcon.Dismiss,    "Close",       Keys.Escape,           (_, _) => Close());
+        AddItem(menu, "arrow_reset", "Reset zoom", "", () => SetZoom(1));
+        AddItem(menu, "zoom_in", "Zoom in", "+", () => SetZoom(_zoom + .1f));
+        AddItem(menu, "zoom_out", "Zoom out", "-", () => SetZoom(_zoom - .1f));
+        menu.Items.Add(new ToolStripSeparator());
+        AddItem(menu, "dismiss", "Close", "Esc", Close);
         return menu;
     }
 
-    private static void AddItem(ContextMenuStrip menu, string iconName, string text, Keys shortcut, EventHandler onClick)
+    private static void AddItem(ContextMenuStrip menu, string icon, string label, string shortcut, Action action)
     {
-        var it = new ToolStripMenuItem(text)
-        {
-            ForeColor = Color.FromArgb(28, 28, 28),
-            Font = new Font("Segoe UI Variable", 10f),
-            Padding = new Padding(2, 4, 8, 4),
-            Image = FluentIcon.Get(iconName, 18, Color.FromArgb(70, 70, 70))
-        };
-        if (shortcut != Keys.None) it.ShortcutKeyDisplayString = ShortcutLabel(shortcut);
-        it.Click += onClick;
-        menu.Items.Add(it);
+        var item = new ToolStripMenuItem(label, FluentIcon.Get(icon, 18, Color.FromArgb(50, 50, 50))) { ShortcutKeyDisplayString = shortcut };
+        item.Click += (_, _) => action(); menu.Items.Add(item);
     }
 
-    private static string ShortcutLabel(Keys k)
+    protected override void OnPaint(PaintEventArgs args)
     {
-        var parts = new List<string>();
-        if ((k & Keys.Control) != 0) parts.Add("Ctrl");
-        if ((k & Keys.Alt) != 0) parts.Add("Alt");
-        if ((k & Keys.Shift) != 0) parts.Add("Shift");
-        var key = k & ~(Keys.Control | Keys.Alt | Keys.Shift);
-        if (key != Keys.None) parts.Add(key.ToString());
-        return string.Join("+", parts);
-    }
-
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        var g = e.Graphics;
-        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        g.PixelOffsetMode   = PixelOffsetMode.HighQuality;
-        g.SmoothingMode     = SmoothingMode.AntiAlias;
-
-        using (var bg = new SolidBrush(TransparencyKey))
-            g.FillRectangle(bg, ClientRectangle);
-
-        var dispW = (int)(_original.Width * _zoom);
-        var dispH = (int)(_original.Height * _zoom);
-        var imgRect = new Rectangle(ShadowPad, ShadowPad, dispW, dispH);
-
-        // 阴影 (3 层)
-        for (int i = 0; i < 3; i++)
+        using var background = new SolidBrush(TransparencyKey); args.Graphics.FillRectangle(background, ClientRectangle);
+        for (int index = 0; index < 3; index++)
         {
-            int s = ShadowPad - i;
-            int alpha = 18 - i * 5;
-            using var shadow = new SolidBrush(Color.FromArgb(alpha, 0, 0, 0));
-            g.FillRectangle(shadow,
-                ShadowPad - s,
-                ShadowPad - s + 1,
-                dispW + s * 2,
-                dispH + s * 2);
+            using var shadow = new SolidBrush(Color.FromArgb(18 - index * 5, 0, 0, 0));
+            var bounds = ImageBounds; bounds.Inflate(ShadowPad - index, ShadowPad - index); bounds.Offset(0, 1);
+            args.Graphics.FillRectangle(shadow, bounds);
         }
-
-        // 图像
-        g.DrawImage(_original, imgRect);
-
-        DrawMarks(g);
-
-        // 1px 灰描边 (Fluent 风格, 不抢眼)
-        using var pen = new Pen(Color.FromArgb(180, 90, 90, 90), 1f);
-        g.DrawRectangle(pen, imgRect);
-
-        if (_markMode)
-            DrawMarkBadge(g);
+        _editor.Draw(args.Graphics);
+        using var border = new Pen(Color.FromArgb(140, 100, 100, 100)); args.Graphics.DrawRectangle(border, ImageBounds);
     }
 
-    protected override void OnMouseDown(MouseEventArgs e)
+    protected override void OnMouseDown(MouseEventArgs args)
     {
         Focus();
-
-        if (_markMode && e.Button == MouseButtons.Left && IsInImage(e.Location))
+        if (_editor.MouseDown(args)) return;
+        if (args.Button == MouseButtons.Left)
         {
-            _marking = true;
-            _markStart = e.Location;
-            _previewMark = null;
-            Capture = true;
-            Cursor = Cursors.Cross;
-            return;
-        }
-
-        if (e.Button == MouseButtons.Left)
-        {
-            _dragging = true;
-            _dragStartScreen = Cursor.Position;
-            _formStart = Location;
+            _dragging = true; _dragStartScreen = Cursor.Position; _formStart = Location; Capture = true;
         }
     }
 
-    protected override void OnMouseMove(MouseEventArgs e)
+    protected override void OnMouseMove(MouseEventArgs args)
     {
-        if (_marking)
+        if (_editor.MouseMove(args)) return;
+        if (_dragging && (args.Button & MouseButtons.Left) != 0)
         {
-            _previewMark = ClientToImageRect(_markStart, e.Location);
-            Invalidate();
-            return;
+            var current = Cursor.Position;
+            Location = new Point(_formStart.X + current.X - _dragStartScreen.X, _formStart.Y + current.Y - _dragStartScreen.Y);
         }
+        Cursor = _editor.Tool == AnnotationTool.None ? Cursors.SizeAll : _editor.Tool == AnnotationTool.Text ? Cursors.IBeam : Cursors.Cross;
+    }
 
-        if (_dragging && (e.Button & MouseButtons.Left) != 0)
+    protected override void OnMouseUp(MouseEventArgs args)
+    {
+        if (_editor.MouseUp(args)) return;
+        _dragging = false; Capture = false;
+    }
+
+    protected override void OnMouseDoubleClick(MouseEventArgs args)
+    {
+        if (args.Button != MouseButtons.Left) return;
+        if (_editor.DoubleClick(args.Location)) { ShowToolbar(); return; }
+        if (_editor.Tool == AnnotationTool.None && !_editor.EditingText) Close();
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs args) => SetZoom(_zoom + (args.Delta > 0 ? .1f : -.1f));
+    private void SetZoom(float zoom)
+    {
+        _editor.CommitText(); _zoom = Math.Clamp(zoom, .5f, 4);
+        Size = new Size(ImageBounds.Width + ShadowPad * 2, ImageBounds.Height + ShadowPad * 2);
+        _editor.BoundsChanged(); PositionToolbar(); Invalidate();
+    }
+
+    protected override void OnKeyDown(KeyEventArgs args)
+    {
+        if (_editor.HandleKey(args)) { if (_editor.Tool != AnnotationTool.None && !_toolbarWindow.Visible) ShowToolbar(); return; }
+        if (args.KeyCode == Keys.Escape) Close();
+        else if (args.KeyCode == Keys.Space) ToggleToolbar();
+        else if (args.Control && args.KeyCode == Keys.C) CopyToClipboard();
+        else if (args.Control && args.KeyCode == Keys.S) Save(args.Shift);
+        else if (args.KeyCode is Keys.Add or Keys.Oemplus) SetZoom(_zoom + .1f);
+        else if (args.KeyCode is Keys.Subtract or Keys.OemMinus) SetZoom(_zoom - .1f);
+        else return;
+        args.SuppressKeyPress = true;
+    }
+
+    protected override void OnShown(EventArgs args) { base.OnShown(args); Activate(); Focus(); }
+    private void ToggleToolbar()
+    {
+        _editor.CommitText();
+        if (_toolbarWindow.Visible)
         {
-            var cur = Cursor.Position;
-            Location = new Point(_formStart.X + cur.X - _dragStartScreen.X,
-                                 _formStart.Y + cur.Y - _dragStartScreen.Y);
+            if (_editor.Tool != AnnotationTool.None) _editor.ToggleTool(_editor.Tool);
+            _toolbarWindow.Hide();
         }
+        else ShowToolbar();
     }
 
-    protected override void OnMouseUp(MouseEventArgs e)
+    private void ShowToolbar() { PositionToolbar(); if (!_toolbarWindow.Visible) _toolbarWindow.Show(this); }
+    private void PositionToolbar()
     {
-        if (_marking)
-        {
-            _marking = false;
-            Capture = false;
-            var rect = ClientToImageRect(_markStart, e.Location);
-            _previewMark = null;
-            if (rect.Width >= 6 && rect.Height >= 6)
-                _marks.Add(rect);
-            Invalidate();
-            return;
-        }
-
-        _dragging = false;
-    }
-
-    protected override void OnMouseDoubleClick(MouseEventArgs e)
-    {
-        if (e.Button == MouseButtons.Left) Close();
-    }
-
-    protected override void OnMouseWheel(MouseEventArgs e)
-    {
-        var delta = e.Delta > 0 ? 0.1f : -0.1f;
-        _zoom = Math.Clamp(_zoom + delta, 0.5f, 4.0f);
-        ApplyZoom();
-    }
-
-    protected override void OnKeyDown(KeyEventArgs e)
-    {
-        if (e.KeyCode == Keys.Escape) Close();
-        else if (e.Control && e.KeyCode == Keys.C) CopyToClipboard();
-        else if (e.Control && e.KeyCode == Keys.S) SaveAs();
-        else if (e.Control && e.KeyCode == Keys.Z) UndoMark();
-        else if (e.KeyCode == Keys.M) ToggleMarkMode();
-        else if (e.KeyCode == Keys.Add || e.KeyCode == Keys.Oemplus)
-        {
-            _zoom = Math.Min(4.0f, _zoom + 0.1f); ApplyZoom();
-        }
-        else if (e.KeyCode == Keys.Subtract || e.KeyCode == Keys.OemMinus)
-        {
-            _zoom = Math.Max(0.5f, _zoom - 0.1f); ApplyZoom();
-        }
-    }
-
-    protected override void OnShown(EventArgs e)
-    {
-        base.OnShown(e);
-        Activate();
-        Focus();
-    }
-
-    protected override void OnMouseEnter(EventArgs e)
-    {
-        base.OnMouseEnter(e);
-        Focus();
-    }
-
-    private void ApplyZoom()
-    {
-        Size = new Size((int)(_original.Width * _zoom) + ShadowPad * 2, (int)(_original.Height * _zoom) + ShadowPad * 2);
-        Invalidate();
+        _toolbarWindow.ClientSize = _editor.Toolbar.Size;
+        var monitor = Screen.FromControl(this).WorkingArea;
+        int left = Math.Clamp(Right - _toolbarWindow.Width, monitor.Left + 8, Math.Max(monitor.Left + 8, monitor.Right - _toolbarWindow.Width - 8));
+        int top = Bottom + 8;
+        if (top + _toolbarWindow.Height > monitor.Bottom) top = Top - _toolbarWindow.Height - 8;
+        top = Math.Clamp(top, monitor.Top + 8, Math.Max(monitor.Top + 8, monitor.Bottom - _toolbarWindow.Height - 8));
+        _toolbarWindow.Location = new Point(left, top);
     }
 
     private void CopyToClipboard()
     {
+        try { using var image = _editor.Export(); Clipboard.SetImage(image); }
+        catch (Exception exception) { MessageBox.Show(this, "Copy failed: " + exception.Message, "FloatShot", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+
+    private void Save(bool saveAs)
+    {
+        _editor.CommitText();
         try
         {
-            using var rendered = RenderAnnotatedImage();
-            Clipboard.SetImage(rendered);
-        }
-        catch { }
-    }
-
-    private void SaveAs()
-    {
-        var settings = Settings.Load();
-        var folder = Directory.Exists(settings.SaveFolder)
-            ? settings.SaveFolder
-            : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-        using var dlg = new SaveFileDialog
-        {
-            Filter = "PNG image (*.png)|*.png|JPEG image (*.jpg)|*.jpg|Bitmap (*.bmp)|*.bmp",
-            InitialDirectory = folder,
-            FileName = FloatShot.Capture.GetAvailableFileName(folder, $"screenshot_{DateTime.Now:yyyyMMdd_HHmmss_fff}.png")
-        };
-        if (dlg.ShowDialog(this) == DialogResult.OK)
-        {
-            try
+            using var image = _editor.Export();
+            if (!saveAs) FloatShot.Capture.SaveAndPostProcess(image, _settings, false, false);
+            else
             {
-                ImageFormat fmt = Path.GetExtension(dlg.FileName).ToLowerInvariant() switch
-                {
-                    ".jpg" or ".jpeg" => ImageFormat.Jpeg,
-                    ".bmp"            => ImageFormat.Bmp,
-                    _                 => ImageFormat.Png
-                };
-                using var rendered = RenderAnnotatedImage();
-                rendered.Save(dlg.FileName, fmt);
+                var folder = Directory.Exists(_settings.SaveFolder) ? _settings.SaveFolder : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+                using var dialog = new SaveFileDialog { Title = "Save screenshot as", Filter = "PNG image (*.png)|*.png|JPEG image (*.jpg)|*.jpg|Bitmap (*.bmp)|*.bmp", InitialDirectory = folder, FileName = FloatShot.Capture.GetAvailableFileName(folder, $"screenshot_{DateTime.Now:yyyyMMdd_HHmmss_fff}.png"), OverwritePrompt = true, RestoreDirectory = true };
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                var format = Path.GetExtension(dialog.FileName).ToLowerInvariant() switch { ".jpg" or ".jpeg" => ImageFormat.Jpeg, ".bmp" => ImageFormat.Bmp, _ => ImageFormat.Png };
+                image.Save(dialog.FileName, format); _settings.SaveFolder = Path.GetDirectoryName(dialog.FileName)!;
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show("Save failed: " + ex.Message, "FloatShot", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            _settings.Save(); _editor.Toolbar.SetSaveFolder(_settings.SaveFolder);
         }
+        catch (Exception exception) { MessageBox.Show(this, "Save failed: " + exception.Message, "FloatShot", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
 
-    private void ToggleMarkMode()
+    private void ShowSaveMenu()
     {
-        _markMode = !_markMode;
-        Cursor = _markMode ? Cursors.Cross : Cursors.SizeAll;
-        Invalidate();
-    }
-
-    private void UndoMark()
-    {
-        if (_marks.Count == 0) return;
-        _marks.RemoveAt(_marks.Count - 1);
-        Invalidate();
-    }
-
-    private void ClearMarks()
-    {
-        if (_marks.Count == 0) return;
-        _marks.Clear();
-        Invalidate();
-    }
-
-    private bool IsInImage(Point p)
-    {
-        var dispW = (int)(_original.Width * _zoom);
-        var dispH = (int)(_original.Height * _zoom);
-        return new Rectangle(ShadowPad, ShadowPad, dispW, dispH).Contains(p);
-    }
-
-    private RectangleF ClientToImageRect(Point a, Point b)
-    {
-        var x1 = Math.Clamp((Math.Min(a.X, b.X) - ShadowPad) / _zoom, 0, _original.Width);
-        var y1 = Math.Clamp((Math.Min(a.Y, b.Y) - ShadowPad) / _zoom, 0, _original.Height);
-        var x2 = Math.Clamp((Math.Max(a.X, b.X) - ShadowPad) / _zoom, 0, _original.Width);
-        var y2 = Math.Clamp((Math.Max(a.Y, b.Y) - ShadowPad) / _zoom, 0, _original.Height);
-        return RectangleF.FromLTRB(x1, y1, x2, y2);
-    }
-
-    private RectangleF ImageToClientRect(RectangleF r) => new(
-        ShadowPad + r.X * _zoom,
-        ShadowPad + r.Y * _zoom,
-        r.Width * _zoom,
-        r.Height * _zoom);
-
-    private void DrawMarks(Graphics g)
-    {
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        foreach (var mark in _marks)
-            DrawMark(g, ImageToClientRect(mark), preview: false);
-        if (_previewMark is { } preview)
-            DrawMark(g, ImageToClientRect(preview), preview: true);
-    }
-
-    private static void DrawMark(Graphics g, RectangleF rect, bool preview)
-    {
-        if (rect.Width < 2 || rect.Height < 2) return;
-
-        using var fill = new SolidBrush(Color.FromArgb(preview ? 30 : 22, 255, 45, 45));
-        using var outline = new Pen(Color.FromArgb(245, 255, 42, 42), preview ? 3.5f : 4.0f)
+        var menu = new ContextMenuStrip();
+        menu.Items.Add(new ToolStripLabel("Save to") { ForeColor = SystemColors.GrayText });
+        menu.Items.Add(new ToolStripLabel(_settings.SaveFolder)); menu.Items.Add(new ToolStripSeparator());
+        AddItem(menu, "save", "Save as...", "Ctrl+Shift+S", () => Save(true));
+        AddItem(menu, "folder", "Set save folder...", "", () =>
         {
-            StartCap = LineCap.Round,
-            EndCap = LineCap.Round,
-            LineJoin = LineJoin.Round
-        };
-        using var glow = new Pen(Color.FromArgb(180, 255, 255, 255), outline.Width + 2.0f)
-        {
-            LineJoin = LineJoin.Round
-        };
-
-        g.FillRectangle(fill, rect);
-        g.DrawRectangle(glow, rect.X, rect.Y, rect.Width, rect.Height);
-        g.DrawRectangle(outline, rect.X, rect.Y, rect.Width, rect.Height);
-    }
-
-    private void DrawMarkBadge(Graphics g)
-    {
-        const string text = "Mark mode";
-        using var font = new Font("Segoe UI", 9f, FontStyle.Bold);
-        var size = g.MeasureString(text, font);
-        var rect = new Rectangle(ShadowPad + 10, ShadowPad + 10, (int)size.Width + 22, (int)size.Height + 12);
-        using var bg = new SolidBrush(Color.FromArgb(225, 255, 255, 255));
-        using var border = new Pen(Color.FromArgb(210, 255, 42, 42), 1.5f);
-        using var path = RoundedRect(rect, 8);
-        g.FillPath(bg, path);
-        g.DrawPath(border, path);
-        using var brush = new SolidBrush(Color.FromArgb(190, 24, 24));
-        g.DrawString(text, font, brush, rect.Left + 11, rect.Top + 6);
-    }
-
-    private Bitmap RenderAnnotatedImage()
-    {
-        var rendered = new Bitmap(_original.Width, _original.Height, PixelFormat.Format32bppArgb);
-        using var g = Graphics.FromImage(rendered);
-        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.DrawImage(_original, 0, 0, _original.Width, _original.Height);
-        foreach (var mark in _marks)
-            DrawExportMark(g, mark);
-        return rendered;
-    }
-
-    private static void DrawExportMark(Graphics g, RectangleF rect)
-    {
-        if (rect.Width < 2 || rect.Height < 2) return;
-        using var fill = new SolidBrush(Color.FromArgb(22, 255, 45, 45));
-        using var glow = new Pen(Color.FromArgb(190, 255, 255, 255), 7f) { LineJoin = LineJoin.Round };
-        using var outline = new Pen(Color.FromArgb(245, 255, 42, 42), 5f) { LineJoin = LineJoin.Round };
-        g.FillRectangle(fill, rect);
-        g.DrawRectangle(glow, rect.X, rect.Y, rect.Width, rect.Height);
-        g.DrawRectangle(outline, rect.X, rect.Y, rect.Width, rect.Height);
-    }
-
-    private static GraphicsPath RoundedRect(Rectangle r, int radius)
-    {
-        var p = new GraphicsPath();
-        int d = radius * 2;
-        p.AddArc(r.X, r.Y, d, d, 180, 90);
-        p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-        p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-        p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-        p.CloseFigure();
-        return p;
+            using var dialog = new FolderBrowserDialog { Description = "Choose the default screenshot folder", UseDescriptionForTitle = true, SelectedPath = _settings.SaveFolder };
+            if (dialog.ShowDialog(this) != DialogResult.OK) return;
+            _settings.SaveFolder = dialog.SelectedPath; _settings.Save(); _editor.Toolbar.SetSaveFolder(_settings.SaveFolder);
+        });
+        menu.Closed += (_, _) => BeginInvoke(menu.Dispose);
+        var anchor = _editor.Toolbar.ActionBounds("options"); menu.Show(new Point(anchor.Right - menu.PreferredSize.Width, anchor.Bottom + 4));
     }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) _original?.Dispose();
+        if (disposing) { _editor.Dispose(); _toolbarWindow.Dispose(); ContextMenuStrip?.Dispose(); _original.Dispose(); }
         base.Dispose(disposing);
     }
 
-    /// <summary>Win11 light theme renderer for ContextMenuStrip</summary>
-    private sealed class LightMenuRenderer : ToolStripProfessionalRenderer
+    private sealed class ToolbarWindow : Form
     {
-        public LightMenuRenderer() : base(new LightColors()) { }
-
-        protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
+        protected override CreateParams CreateParams
         {
-            e.TextColor = Color.FromArgb(28, 28, 28);
-            base.OnRenderItemText(e);
+            get { var parameters = base.CreateParams; parameters.ExStyle |= 0x00000008 | 0x00000080; return parameters; }
         }
-    }
-
-    private sealed class LightColors : ProfessionalColorTable
-    {
-        public override Color MenuItemSelected             => Color.FromArgb(243, 243, 243);
-        public override Color MenuItemSelectedGradientBegin=> Color.FromArgb(243, 243, 243);
-        public override Color MenuItemSelectedGradientEnd  => Color.FromArgb(243, 243, 243);
-        public override Color MenuItemBorder               => Color.Transparent;
-        public override Color MenuBorder                   => Color.FromArgb(229, 229, 229);
-        public override Color ToolStripDropDownBackground  => Color.White;
-        public override Color ImageMarginGradientBegin     => Color.White;
-        public override Color ImageMarginGradientMiddle    => Color.White;
-        public override Color ImageMarginGradientEnd       => Color.White;
-        public override Color SeparatorDark                => Color.FromArgb(232, 232, 232);
-        public override Color SeparatorLight               => Color.FromArgb(232, 232, 232);
     }
 }

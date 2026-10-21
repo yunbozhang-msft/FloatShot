@@ -61,7 +61,7 @@ FloatShot captures the locally rendered remote meeting view. Repository screensh
 - Stays visible above a full-screen Windows App window by using a layered topmost tool window on the local PC.
 - Captures a selected region, all monitors, the primary screen, or the active window.
 - Lets you adjust the selected region before confirming.
-- Provides region toolbar actions for rectangle mark, pen mark, pin, copy, save, and cancel.
+- Provides a compact English toolbar for rectangles, arrows, pen, highlighter, mosaic, text, undo/redo, pin, copy, and save.
 - Supports pinned screenshots that can be moved, zoomed, copied, saved, or closed.
 - Saves screenshots to a configurable folder and can optionally copy captures to the clipboard.
 
@@ -110,7 +110,7 @@ Install [Inno Setup](https://jrsoftware.org/isinfo.php), then run:
 .\build\package-installer.ps1
 ```
 
-The installer will be written to `installer\Output\FloatShotSetup-0.2.7.exe`.
+The installer will be written to `installer\Output\FloatShotSetup-0.3.0.exe`.
 
 ## Troubleshooting
 
@@ -126,11 +126,15 @@ Use the latest installer, or exit FloatShot from the tray menu before installing
 - Click the button for the default capture mode.
 - Use Settings to change save folder, default mode, hotkeys, clipboard behavior, floating button visibility, and startup behavior.
 - In region capture mode, drag to select an area, then resize or move the selection before choosing an action.
-- Use the toolbar to mark, draw, pin, copy, save, or cancel.
+- Use the toolbar to annotate, pin, copy, save, or cancel. Rectangle supports Outline and Solid; highlighter stays translucent; mosaic supports Brush and Rectangle with a strength slider; text supports color, size, and bold.
+- Click an active drawing tool again to deselect it and move or resize the capture frame. New captures always start in selection mode.
+- Click to add text, click away or switch tools to finish, and press Esc while typing to cancel the text edit. In selection mode, drag text to move it or double-click it to edit again.
+- Tool colors, widths, rectangle fill, mosaic mode/strength, and text options are remembered across restarts and shared by captures and pinned images. Captured images and annotation contents are not stored in settings.
+- On a pinned image, press Space or choose Annotate from its right-click menu to toggle the same toolbar. Display zoom does not change the exported image resolution.
 - Hover over a toolbar button to see its name and shortcut.
 - `Enter`, `C`, or `Ctrl+C` copies the selected screenshot without creating an image file.
 - For new users, the default save location is `FloatShotScreenshots` under the local Windows user's Pictures folder. Windows resolves the actual Pictures location regardless of display language or folder redirection. Existing configured locations are preserved.
-- Save writes directly to the configured folder without opening a dialog. Hover over Save to see the destination; its small arrow offers Save, Save as, and Set save folder. `S` or `Ctrl+S` saves directly, while `Ctrl+Shift+S` opens Save As. Successful Save As captures remember the selected folder; cancelling does not save or copy the image.
+- Save writes directly to the configured folder without opening a dialog. Hover over Save to see the destination; its small arrow shows the destination, Save as, and Set save folder. `S` or `Ctrl+S` saves directly, while `Ctrl+Shift+S` opens Save As. Successful Save As captures remember the selected folder; cancelling does not save or copy the image.
 - Set save folder chooses and remembers the default destination immediately. The current selection remains available, and cancelling the screenshot afterward does not undo the folder preference. Cancelling the folder picker leaves the existing destination unchanged.
 - Default screenshot names include date, time, and milliseconds, such as `screenshot_20261015_130405_123.png`. Existing suggested names receive a numeric suffix; manually choosing an existing file still requires overwrite confirmation.
 

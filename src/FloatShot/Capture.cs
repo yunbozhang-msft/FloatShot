@@ -41,7 +41,7 @@ internal static class Capture
         {
             settings.SaveFolder = folder;
             settings.Save();
-        });
+        }, settings);
         if (result is null) return null;
 
         var bmp = result.Image;   // already cropped from the pre-overlay snapshot
@@ -59,7 +59,7 @@ internal static class Capture
                 return null;
 
             case RegionAction.Pin:
-                PinnedImage.ShowAt(bmp, result.ScreenBounds.Location);
+                PinnedImage.ShowAt(bmp, result.ScreenBounds.Location, settings);
                 return null;
 
             default:
@@ -68,7 +68,7 @@ internal static class Capture
         }
     }
 
-    private static string? SaveAndPostProcess(Bitmap bmp, Settings settings, bool copyToClipboard, bool openFolder, bool ownsBmp = false, bool saveAs = false)
+    internal static string? SaveAndPostProcess(Bitmap bmp, Settings settings, bool copyToClipboard, bool openFolder, bool ownsBmp = false, bool saveAs = false)
     {
         try
         {

@@ -1,4 +1,3 @@
-using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
@@ -7,946 +6,280 @@ using System.Windows.Forms;
 namespace FloatShot;
 
 internal enum RegionAction { Cancel, Save, Copy, Pin, SaveAs }
-
-internal enum RegionTool { RectangleMark, Pen, Pin, Copy, Save, Cancel, SaveOptions }
-
-internal enum EditMode { None, RectangleMark, Pen }
-
 internal enum SelectionDragMode { None, NewSelection, MoveSelection, ResizeSelection }
-
 [Flags]
 internal enum ResizeEdge { None = 0, Left = 1, Top = 2, Right = 4, Bottom = 8 }
-
-/// <summary>Result of a region capture; <see cref="Image"/> is owned by the caller and must be disposed.</summary>
 internal sealed record RegionResult(Bitmap Image, Rectangle ScreenBounds, RegionAction Action);
 
-/// <summary>
-/// PixPin-style region capture:
-/// - Snapshot the whole virtual screen first.
-/// - Show a fullscreen overlay that paints the snapshot dimmed; the selection
-///   rectangle re-paints the original snapshot (so selected area looks bright).
-/// - Floating Fluent toolbar (Pin / Copy / Save / Cancel) above the selection.
-/// </summary>
 internal static class RegionCapture
 {
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr handle);
 
-    public static RegionResult? Pick(string? saveFolder = null, Action<string>? saveFolderChanged = null)
+    public static RegionResult? Pick(string? saveFolder = null, Action<string>? saveFolderChanged = null, Settings? settings = null)
     {
-        // Snapshot the whole virtual screen BEFORE showing the overlay so we
-        // get the real underlying content (devbox / w365 projection too).
-        var virt = SystemInformation.VirtualScreen;
-        var snapshot = new Bitmap(virt.Width, virt.Height, PixelFormat.Format32bppArgb);
-        using (var g = Graphics.FromImage(snapshot))
-            g.CopyFromScreen(virt.Location, Point.Empty, virt.Size, CopyPixelOperation.SourceCopy);
-
-        var prev = GetForegroundWindow();
-
-        Bitmap? cropped = null;
-        Rectangle screenRect = Rectangle.Empty;
-        RegionAction action = RegionAction.Cancel;
-
+        var virtualScreen = SystemInformation.VirtualScreen;
+        using var snapshot = new Bitmap(virtualScreen.Width, virtualScreen.Height, PixelFormat.Format32bppArgb);
+        using (var graphics = Graphics.FromImage(snapshot))
+            graphics.CopyFromScreen(virtualScreen.Location, Point.Empty, virtualScreen.Size, CopyPixelOperation.SourceCopy);
+        var foreground = GetForegroundWindow();
         try
         {
-            using var f = new OverlayForm(snapshot, virt, saveFolder, saveFolderChanged);
-            var dr = f.ShowDialog();
-            if (dr != DialogResult.OK || f.Action == RegionAction.Cancel) return null;
-
-            action = f.Action;
-            screenRect = f.SelectedScreenRect;
-
-            // Export the crop from the overlay so annotation marks are included.
-            cropped = f.RenderSelectedImage();
-            return new RegionResult(cropped, screenRect, action);
+            using var overlay = new OverlayForm(snapshot, virtualScreen, saveFolder, saveFolderChanged, settings);
+            if (overlay.ShowDialog() != DialogResult.OK || overlay.Action == RegionAction.Cancel) return null;
+            return new RegionResult(overlay.RenderSelectedImage(), overlay.SelectedScreenRect, overlay.Action);
         }
-        finally
-        {
-            snapshot.Dispose();
-            try { SetForegroundWindow(prev); } catch { }
-        }
+        finally { try { SetForegroundWindow(foreground); } catch { } }
     }
 
     private sealed class OverlayForm : Form
     {
         private readonly Bitmap _snapshot;
         private readonly Rectangle _virt;
-        private string _saveFolder;
+        private readonly Settings _settings;
         private readonly Action<string>? _saveFolderChanged;
+        private readonly AnnotationEditor _editor;
+        private ContextMenuStrip? _saveMenu;
+        private string _saveFolder;
+        private Rectangle _sel;
+        private Rectangle _dragStartSelection;
         private Point _start;
-        private Rectangle _sel;            // overlay-local coordinates
+        private bool _selected;
         private SelectionDragMode _dragMode;
         private ResizeEdge _resizeEdge;
-        private Rectangle _dragStartSelection;
-        private bool _selected;
-        private EditMode _editMode;
-        private bool _marking;
-        private Point _markStart;
-        private RectangleF? _previewMark;
-        private List<PointF>? _previewStroke;
-        private readonly List<RectangleF> _marks = new();        // overlay-local coordinates
-        private readonly List<List<PointF>> _strokes = new();    // overlay-local coordinates
-        private List<ToolButton> _buttons = new();
-        private readonly System.Windows.Forms.Timer _toolTipTimer = new() { Interval = 300 };
-        private ToolButton? _hoveredButton;
-        private string? _toolTipText;
-        private ContextMenuStrip? _saveMenu;
-        private ToolStripLabel? _saveFolderLabel;
 
         public Rectangle SelectedScreenRect { get; private set; }
         public RegionAction Action { get; private set; } = RegionAction.Cancel;
 
-        public OverlayForm(Bitmap snapshot, Rectangle virt, string? saveFolder = null, Action<string>? saveFolderChanged = null)
+        public OverlayForm(Bitmap snapshot, Rectangle virtualScreen, string? saveFolder = null, Action<string>? saveFolderChanged = null, Settings? settings = null)
         {
-            _snapshot = snapshot;
-            _virt = virt;
-            _saveFolder = saveFolder ?? new Settings().SaveFolder;
-            _saveFolderChanged = saveFolderChanged;
-            FormBorderStyle = FormBorderStyle.None;
-            StartPosition   = FormStartPosition.Manual;
-            Bounds          = virt;
-            ShowInTaskbar   = false;
-            TopMost         = true;
-            DoubleBuffered  = true;
-            Cursor          = Cursors.Cross;
-            KeyPreview      = true;
-            BackColor       = Color.Black;
-            Icon            = AppIcon.Get();
-            _toolTipTimer.Tick += (_, _) => ShowToolTip();
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing)
+            _snapshot = snapshot; _virt = virtualScreen; _settings = settings ?? Settings.Load();
+            _saveFolder = saveFolder ?? _settings.SaveFolder; _saveFolderChanged = saveFolderChanged;
+            FormBorderStyle = FormBorderStyle.None; StartPosition = FormStartPosition.Manual;
+            Bounds = virtualScreen; ShowInTaskbar = false; TopMost = true; DoubleBuffered = true;
+            KeyPreview = true; Cursor = Cursors.Cross; BackColor = Color.Black; Icon = AppIcon.Get();
+            _editor = new AnnotationEditor(this, snapshot, () => _sel, () => _sel, _settings);
+            _editor.Toolbar.Visible = false;
+            Controls.Add(_editor.Toolbar);
+            _editor.Changed += () => { if (_selected) PositionToolbar(); };
+            _editor.ActionRequested += action =>
             {
-                _toolTipTimer.Dispose();
-                _saveMenu?.Dispose();
-            }
-            base.Dispose(disposing);
+                switch (action)
+                {
+                    case "pin": Confirm(RegionAction.Pin); break;
+                    case "copy": Confirm(RegionAction.Copy); break;
+                    case "save": Confirm(RegionAction.Save); break;
+                    case "options": ShowSaveMenu(); break;
+                    case "close": Confirm(RegionAction.Cancel); break;
+                }
+            };
+            _editor.Toolbar.SetSaveFolder(_saveFolder);
         }
 
         protected override CreateParams CreateParams
         {
-            get
-            {
-                var cp = base.CreateParams;
-                cp.ExStyle |= 0x00000008 | 0x00000080; // TOPMOST | TOOLWINDOW
-                return cp;
-            }
+            get { var parameters = base.CreateParams; parameters.ExStyle |= 0x00000008 | 0x00000080; return parameters; }
         }
 
-        protected override void OnPaint(PaintEventArgs e)
+        protected override void OnPaint(PaintEventArgs args)
         {
-            var g = e.Graphics;
-            g.PixelOffsetMode   = PixelOffsetMode.Half;
-            g.InterpolationMode = InterpolationMode.NearestNeighbor;
-            g.CompositingMode   = CompositingMode.SourceOver;
-            g.SmoothingMode     = SmoothingMode.None;
-
-            // 1. Draw the dimmed snapshot as base layer
-            var attr = new ImageAttributes();
-            var matrix = new ColorMatrix(new[]
+            var graphics = args.Graphics;
+            graphics.InterpolationMode = InterpolationMode.NearestNeighbor;
+            graphics.PixelOffsetMode = PixelOffsetMode.Half;
+            using var attributes = new ImageAttributes();
+            attributes.SetColorMatrix(new ColorMatrix(new[]
             {
-                new float[] { 0.50f, 0,     0,     0, 0 },
-                new float[] { 0,     0.50f, 0,     0, 0 },
-                new float[] { 0,     0,     0.50f, 0, 0 },
-                new float[] { 0,     0,     0,     1, 0 },
-                new float[] { 0,     0,     0,     0, 1 }
-            });
-            attr.SetColorMatrix(matrix);
-            g.DrawImage(_snapshot,
-                new Rectangle(0, 0, _virt.Width, _virt.Height),
-                0, 0, _virt.Width, _virt.Height, GraphicsUnit.Pixel, attr);
-            attr.Dispose();
-
-            // 2. Selection: redraw original (bright) inside the rectangle
+                new float[] { .5f, 0, 0, 0, 0 }, new float[] { 0, .5f, 0, 0, 0 },
+                new float[] { 0, 0, .5f, 0, 0 }, new float[] { 0, 0, 0, 1, 0 }, new float[] { 0, 0, 0, 0, 1 }
+            }));
+            graphics.DrawImage(_snapshot, ClientRectangle, 0, 0, _snapshot.Width, _snapshot.Height, GraphicsUnit.Pixel, attributes);
             if (_sel.Width > 0 && _sel.Height > 0)
             {
-                g.DrawImage(_snapshot,
-                    _sel,
-                    _sel.X, _sel.Y, _sel.Width, _sel.Height,
-                    GraphicsUnit.Pixel);
-
-                DrawAnnotations(g);
-
-                // 3. Bold outline + corner accents
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                using (var outer = new Pen(Color.FromArgb(235, 255, 255, 255), 7.0f))
-                    g.DrawRectangle(outer, _sel);
-                using (var pen = new Pen(Fluent.Accent, 4.5f))
-                    g.DrawRectangle(pen, _sel);
-
-                int corner = 24;
-                using (var glow = new Pen(Color.FromArgb(230, 255, 255, 255), 8.0f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-                {
-                    g.DrawLine(glow, _sel.Left, _sel.Top, _sel.Left + corner, _sel.Top);
-                    g.DrawLine(glow, _sel.Left, _sel.Top, _sel.Left, _sel.Top + corner);
-                    g.DrawLine(glow, _sel.Right, _sel.Top, _sel.Right - corner, _sel.Top);
-                    g.DrawLine(glow, _sel.Right, _sel.Top, _sel.Right, _sel.Top + corner);
-                    g.DrawLine(glow, _sel.Left, _sel.Bottom, _sel.Left + corner, _sel.Bottom);
-                    g.DrawLine(glow, _sel.Left, _sel.Bottom, _sel.Left, _sel.Bottom - corner);
-                    g.DrawLine(glow, _sel.Right, _sel.Bottom, _sel.Right - corner, _sel.Bottom);
-                    g.DrawLine(glow, _sel.Right, _sel.Bottom, _sel.Right, _sel.Bottom - corner);
-                }
-                using (var pen = new Pen(Fluent.AccentHover, 6.0f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-                {
-                    g.DrawLine(pen, _sel.Left, _sel.Top, _sel.Left + corner, _sel.Top);
-                    g.DrawLine(pen, _sel.Left, _sel.Top, _sel.Left, _sel.Top + corner);
-                    g.DrawLine(pen, _sel.Right, _sel.Top, _sel.Right - corner, _sel.Top);
-                    g.DrawLine(pen, _sel.Right, _sel.Top, _sel.Right, _sel.Top + corner);
-                    g.DrawLine(pen, _sel.Left, _sel.Bottom, _sel.Left + corner, _sel.Bottom);
-                    g.DrawLine(pen, _sel.Left, _sel.Bottom, _sel.Left, _sel.Bottom - corner);
-                    g.DrawLine(pen, _sel.Right, _sel.Bottom, _sel.Right - corner, _sel.Bottom);
-                    g.DrawLine(pen, _sel.Right, _sel.Bottom, _sel.Right, _sel.Bottom - corner);
-                }
-
+                _editor.Draw(graphics);
+                using var white = new Pen(Color.White, 4);
+                using var blue = new Pen(Fluent.Accent, 2);
+                graphics.DrawRectangle(white, _sel); graphics.DrawRectangle(blue, _sel);
                 if (_selected)
-                    DrawResizeHandles(g);
-
-                // 4. Size pill (top-left of selection)
-                var label = $"{_sel.Width} × {_sel.Height}";
-                using var fnt = Fluent.TextFont(9.5f, FontStyle.Bold);
-                var sz = g.MeasureString(label, fnt);
-                int padX = 8, padY = 3;
-                int lblW = (int)sz.Width + padX * 2;
-                int lblH = (int)sz.Height + padY * 2;
-                int lx = _sel.X;
-                int ly = _sel.Y - lblH - 6;
-                if (ly < 0) ly = _sel.Y + 6;
-                using (var bgB = new SolidBrush(Color.FromArgb(220, 32, 32, 32)))
-                using (var path = RoundedRect(new Rectangle(lx, ly, lblW, lblH), 4))
-                    g.FillPath(bgB, path);
-                g.DrawString(label, fnt, Brushes.White, lx + padX, ly + padY);
+                {
+                    foreach (var point in HandleCenters())
+                    {
+                        var handle = new Rectangle(point.X - 4, point.Y - 4, 8, 8);
+                        graphics.FillRectangle(Brushes.White, handle); graphics.DrawRectangle(blue, handle);
+                    }
+                }
+                string label = $"{_sel.Width} x {_sel.Height}";
+                using var font = Fluent.TextFont(9);
+                var size = TextRenderer.MeasureText(label, font);
+                var labelBounds = new Rectangle(_sel.Left, Math.Max(0, _sel.Top - size.Height - 10), size.Width + 12, size.Height + 6);
+                using var background = new SolidBrush(Color.FromArgb(35, 35, 35));
+                graphics.FillRectangle(background, labelBounds);
+                TextRenderer.DrawText(graphics, label, font, labelBounds, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }
-
-            if (_selected)
+            else
             {
-                DrawToolbar(g);
-                DrawToolTip(g);
+                using var font = Fluent.TextFont(11);
+                var hint = new Rectangle(0, 25, Width, 40);
+                TextRenderer.DrawText(graphics, "Drag to select region", font, hint, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }
-            else if (_dragMode == SelectionDragMode.None && _sel.Width == 0) DrawCenterHint(g);
         }
 
-        private void DrawCenterHint(Graphics g)
+        private void PositionToolbar()
         {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            var hint = "Drag to select region   ·   Esc / Right-click to cancel";
-            using var fnt = Fluent.TextFont(11.5f);
-            var sz = g.MeasureString(hint, fnt);
-            int padX = 18, padY = 10;
-            int hW = (int)sz.Width + padX * 2;
-            int hH = (int)sz.Height + padY * 2;
-            int lx = (_virt.Width - hW) / 2;
-            int ly = 32;
-            using (var bgB = new SolidBrush(Color.FromArgb(220, 32, 32, 32)))
-            using (var path = RoundedRect(new Rectangle(lx, ly, hW, hH), Fluent.Radius))
-                g.FillPath(bgB, path);
-            using (var pen = new Pen(Fluent.Border, 1f))
-            using (var path = RoundedRect(new Rectangle(lx, ly, hW, hH), Fluent.Radius))
-                g.DrawPath(pen, path);
-            g.DrawString(hint, fnt, Brushes.White, lx + padX, ly + padY);
-        }
-
-        private void DrawToolbar(Graphics g)
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-
-            const int btnSize = 48, optionsWidth = 24, gap = 4, pad = 8, separatorGap = 12;
-            int barW = _buttons.Sum(button => button.Tool == RegionTool.SaveOptions ? optionsWidth : btnSize)
-                + (gap * (_buttons.Count - 1)) + pad * 2 + separatorGap;
-            int barH = btnSize + pad * 2;
+            var toolbar = _editor.Toolbar;
             var monitor = RectangleToClient(Screen.FromPoint(PointToScreen(new Point(_sel.Right - 1, _sel.Bottom - 1))).Bounds);
+            int left = Math.Clamp(_sel.Right - toolbar.Width, monitor.Left + 8, Math.Max(monitor.Left + 8, monitor.Right - toolbar.Width - 8));
+            int top = _sel.Bottom + 10;
+            if (top + toolbar.Height > monitor.Bottom) top = _sel.Top - toolbar.Height - 10;
+            if (top < monitor.Top) top = _sel.Bottom - toolbar.Height - 10;
+            top = Math.Clamp(top, monitor.Top + 8, Math.Max(monitor.Top + 8, monitor.Bottom - toolbar.Height - 8));
+            toolbar.Location = new Point(left, top);
+        }
 
-            // Default: right-bottom of selection, with auto-fallback when off-screen.
-            int bx = _sel.Right - barW;            // align right edge
-            int by = _sel.Bottom + 8;              // below selection
-            // Fallback chain when no room below or off the right edge
-            if (by + barH > monitor.Bottom) by = _sel.Top - barH - 8;
-            if (by < monitor.Top) by = Math.Min(_sel.Bottom - barH - 8, monitor.Bottom - barH - 8);
-            by = Math.Clamp(by, monitor.Top + 8, Math.Max(monitor.Top + 8, monitor.Bottom - barH - 8));
-            bx = Math.Clamp(bx, monitor.Left + 8, Math.Max(monitor.Left + 8, monitor.Right - barW - 8));
-
-            var barRect = new Rectangle(bx, by, barW, barH);
-
-            // Soft drop shadow
-            for (int i = 0; i < 4; i++)
+        protected override void OnMouseDown(MouseEventArgs args)
+        {
+            if (args.Button == MouseButtons.Right) { Confirm(RegionAction.Cancel); return; }
+            if (args.Button != MouseButtons.Left) return;
+            if (!_selected)
             {
-                using var shadow = new SolidBrush(Color.FromArgb(48 - i * 10, 0, 0, 0));
-                using var sp = RoundedRect(new Rectangle(bx - i, by + 2 + i, barW + i * 2, barH + i), Fluent.Radius);
-                g.FillPath(shadow, sp);
+                _dragMode = SelectionDragMode.NewSelection; _start = args.Location; _sel = new Rectangle(_start, Size.Empty); Capture = true; return;
             }
-
-            // White Mica-like body + 1px subtle border
-            using (var bg = new SolidBrush(Color.FromArgb(245, 250, 250, 250)))
-            using (var path = RoundedRect(barRect, Fluent.Radius))
-                g.FillPath(bg, path);
-            using (var pen = new Pen(Color.FromArgb(60, 0, 0, 0), 1f))
-            using (var path = RoundedRect(barRect, Fluent.Radius))
-                g.DrawPath(pen, path);
-
-            // Buttons
-            int x = bx + pad;
-            int y = by + pad;
-            for (int i = 0; i < _buttons.Count; i++)
+            if (_editor.MouseDown(args)) return;
+            var hit = HitTestResize(args.Location);
+            if (_editor.Tool == AnnotationTool.None && (_sel.Contains(args.Location) || hit != ResizeEdge.None))
             {
-                if (i == 2)
-                {
-                    using var separator = new Pen(Color.FromArgb(35, 0, 0, 0));
-                    g.DrawLine(separator, x + separatorGap / 2 - gap / 2, y + 10,
-                        x + separatorGap / 2 - gap / 2, y + btnSize - 10);
-                    x += separatorGap;
-                }
-                var b = _buttons[i];
-                int buttonWidth = b.Tool == RegionTool.SaveOptions ? optionsWidth : btnSize;
-                b.Bounds = new Rectangle(x, y, buttonWidth, btnSize);
-
-                bool activeTool = (b.Tool == RegionTool.RectangleMark && _editMode == EditMode.RectangleMark)
-                    || (b.Tool == RegionTool.Pen && _editMode == EditMode.Pen);
-
-                // Hover / active background (subtle grey, accent-tinted for cancel)
-                if (b.Hovered || activeTool)
-                {
-                    Color hoverBg = b.Tool == RegionTool.Cancel
-                        ? Color.FromArgb(40, 196, 43, 28)
-                        : activeTool
-                            ? Color.FromArgb(46, b.AccentColor.R, b.AccentColor.G, b.AccentColor.B)
-                            : Color.FromArgb(40, 0, 0, 0);
-                    using var hb = new SolidBrush(hoverBg);
-                    using var hp = RoundedRect(b.Bounds, Fluent.RadiusSmall);
-                    g.FillPath(hb, hp);
-                }
-
-                // Icon colour: dark grey on white; accent on hover
-                Color iconColor = b.Action switch
-                {
-                    RegionAction.Cancel when b.Hovered || activeTool => Fluent.AccentRed,
-                    RegionAction.Cancel                              => Color.FromArgb(255, 90, 90, 90),
-                    _ when b.Hovered || activeTool                   => b.AccentColor,
-                    _                                                => Color.FromArgb(255, 60, 60, 60)
-                };
-
-                DrawToolIcon(g, b, iconColor);
-
-                x += buttonWidth + gap;
+                _dragMode = hit == ResizeEdge.None ? SelectionDragMode.MoveSelection : SelectionDragMode.ResizeSelection;
+                _resizeEdge = hit; _start = args.Location; _dragStartSelection = _sel; Capture = true;
             }
         }
 
-        protected override void OnMouseDown(MouseEventArgs e)
+        protected override void OnMouseMove(MouseEventArgs args)
         {
-            ResetToolTip();
-            if (_selected)
+            if (_selected && _editor.MouseMove(args)) return;
+            switch (_dragMode)
             {
-                if (e.Button == MouseButtons.Left)
-                {
-                    foreach (var b in _buttons)
-                    {
-                        if (b.Bounds.Contains(e.Location))
-                        {
-                            HandleToolClick(b.Tool);
-                            return;
-                        }
-                    }
-
-                    var hit = HitTestResize(e.Location);
-                    if (_sel.Contains(e.Location) || hit != ResizeEdge.None)
-                    {
-                        if (_editMode == EditMode.RectangleMark)
-                        {
-                            _marking = true;
-                            _markStart = e.Location;
-                            _previewMark = null;
-                            Capture = true;
-                            Cursor = Cursors.Cross;
-                            return;
-                        }
-
-                        if (_editMode == EditMode.Pen)
-                        {
-                            _marking = true;
-                            _previewStroke = new List<PointF> { e.Location };
-                            Capture = true;
-                            Cursor = Cursors.Cross;
-                            return;
-                        }
-
-                        _dragMode = hit == ResizeEdge.None ? SelectionDragMode.MoveSelection : SelectionDragMode.ResizeSelection;
-                        _resizeEdge = hit;
-                        _start = e.Location;
-                        _dragStartSelection = _sel;
-                        Capture = true;
-                        return;
-                    }
-                }
-                else if (e.Button == MouseButtons.Right)
-                {
-                    if (_buttons.Any(button => button.Tool is RegionTool.Save or RegionTool.SaveOptions && button.Bounds.Contains(e.Location)))
-                    {
-                        ShowSaveMenu();
-                        return;
-                    }
-                    DialogResult = DialogResult.Cancel;
-                    Close();
-                }
-                return;
-            }
-
-            if (e.Button == MouseButtons.Left)
-            {
-                _dragMode = SelectionDragMode.NewSelection;
-                _start = e.Location;
-                _sel = new Rectangle(e.X, e.Y, 0, 0);
-                Invalidate();
-            }
-            else if (e.Button == MouseButtons.Right)
-            {
-                DialogResult = DialogResult.Cancel;
-                Close();
-            }
-        }
-
-        protected override void OnMouseMove(MouseEventArgs e)
-        {
-            if (_selected)
-            {
-                if (_marking)
-                {
-                    if (_editMode == EditMode.RectangleMark)
-                        _previewMark = NormalizeRect(_markStart, ClampToSelection(e.Location));
-                    else if (_editMode == EditMode.Pen && _previewStroke is not null)
-                        _previewStroke.Add(ClampToSelection(e.Location));
-                    Invalidate();
+                case SelectionDragMode.NewSelection:
+                    var point = new Point(Math.Clamp(args.X, 0, Width), Math.Clamp(args.Y, 0, Height));
+                    _sel = Rectangle.FromLTRB(Math.Min(_start.X, point.X), Math.Min(_start.Y, point.Y), Math.Max(_start.X, point.X), Math.Max(_start.Y, point.Y));
+                    break;
+                case SelectionDragMode.MoveSelection:
+                    _sel = new Rectangle(Math.Clamp(_dragStartSelection.X + args.X - _start.X, 0, Width - _sel.Width), Math.Clamp(_dragStartSelection.Y + args.Y - _start.Y, 0, Height - _sel.Height), _sel.Width, _sel.Height);
+                    break;
+                case SelectionDragMode.ResizeSelection:
+                    _sel = ResizeSelection(_dragStartSelection, _resizeEdge, args.Location);
+                    break;
+                default:
+                    if (_selected) Cursor = _editor.Tool == AnnotationTool.None ? CursorForResize(HitTestResize(args.Location), _sel.Contains(args.Location)) : _editor.Tool == AnnotationTool.Text ? Cursors.IBeam : Cursors.Cross;
                     return;
-                }
-
-                if (_dragMode == SelectionDragMode.MoveSelection)
-                {
-                    var dx = e.X - _start.X;
-                    var dy = e.Y - _start.Y;
-                    _sel = ClampSelection(new Rectangle(_dragStartSelection.X + dx, _dragStartSelection.Y + dy, _dragStartSelection.Width, _dragStartSelection.Height));
-                    SelectedScreenRect = ToScreenRect(_sel);
-                    Invalidate();
-                    return;
-                }
-
-                if (_dragMode == SelectionDragMode.ResizeSelection)
-                {
-                    _sel = ResizeSelection(_dragStartSelection, _resizeEdge, e.Location);
-                    SelectedScreenRect = ToScreenRect(_sel);
-                    Invalidate();
-                    return;
-                }
-
-                bool changed = false;
-                foreach (var b in _buttons)
-                {
-                    var hover = b.Bounds.Contains(e.Location);
-                    if (hover != b.Hovered) { b.Hovered = hover; changed = true; }
-                }
-                var hoveredButton = _buttons.FirstOrDefault(b => b.Hovered);
-                if (hoveredButton != _hoveredButton)
-                {
-                    ResetToolTip();
-                    _hoveredButton = hoveredButton;
-                    if (_hoveredButton is not null) _toolTipTimer.Start();
-                }
-                Cursor = _buttons.Any(b => b.Hovered)
-                    ? Cursors.Hand
-                    : _editMode == EditMode.None
-                        ? CursorForResize(HitTestResize(e.Location), _sel.Contains(e.Location))
-                        : _sel.Contains(e.Location) ? Cursors.Cross : Cursors.Default;
-                if (changed) Invalidate();
-                return;
             }
-
-            if (_dragMode != SelectionDragMode.NewSelection) return;
-            var x = Math.Min(_start.X, e.X);
-            var y = Math.Min(_start.Y, e.Y);
-            var w = Math.Abs(e.X - _start.X);
-            var h = Math.Abs(e.Y - _start.Y);
-            _sel = new Rectangle(x, y, w, h);
+            if (_selected) { SelectedScreenRect = ToScreenRect(_sel); _editor.BoundsChanged(); PositionToolbar(); }
             Invalidate();
         }
 
-        protected override void OnMouseLeave(EventArgs e)
+        protected override void OnMouseUp(MouseEventArgs args)
         {
-            ResetToolTip();
-            foreach (var button in _buttons) button.Hovered = false;
-            Invalidate();
-            base.OnMouseLeave(e);
-        }
-
-        private void ResetToolTip()
-        {
-            _toolTipTimer.Stop();
-            if (_toolTipText is not null) Invalidate();
-            _toolTipText = null;
-            _hoveredButton = null;
-        }
-
-        private void ShowToolTip()
-        {
-            _toolTipTimer.Stop();
-            if (_hoveredButton is not { } button || !button.Bounds.Contains(PointToClient(MousePosition))) return;
-
-            _toolTipText = button.Tool switch
+            if (_selected && _editor.MouseUp(args)) return;
+            var previous = _dragMode; _dragMode = SelectionDragMode.None; _resizeEdge = ResizeEdge.None; Capture = false;
+            if (previous == SelectionDragMode.NewSelection && _sel.Width > 4 && _sel.Height > 4)
             {
-                RegionTool.RectangleMark => "Rectangle mark (M)",
-                RegionTool.Pen => "Freehand pen (B)",
-                RegionTool.Pin => "Pin to screen (P)",
-                RegionTool.Copy => "Copy to clipboard (Enter / C / Ctrl+C)",
-                RegionTool.Save => $"Save to {_saveFolder}\nS / Ctrl+S",
-                RegionTool.SaveOptions => "Save options",
-                _ => "Cancel capture (Esc)"
-            };
+                _selected = true; SelectedScreenRect = ToScreenRect(_sel);
+                _editor.Toolbar.Visible = true; PositionToolbar(); Cursor = Cursors.SizeAll;
+            }
             Invalidate();
         }
 
-        private void DrawToolTip(Graphics g)
+        protected override void OnMouseDoubleClick(MouseEventArgs args) { if (_selected) _editor.DoubleClick(args.Location); }
+        protected override void OnMouseCaptureChanged(EventArgs args)
         {
-            if (_toolTipText is null || _hoveredButton is not { } button) return;
-            using var font = Fluent.TextFont(9.5f);
-            var monitor = RectangleToClient(Screen.FromPoint(PointToScreen(button.Bounds.Location)).Bounds);
-            var textFlags = TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
-            var size = TextRenderer.MeasureText(g, _toolTipText, font,
-                new Size(Math.Max(1, Math.Min(420, monitor.Width - 24)), int.MaxValue), textFlags);
-            int width = Math.Min(size.Width + 24, monitor.Width);
-            int height = size.Height + 16;
-            int tipX = Math.Clamp(button.Bounds.Left, monitor.Left, monitor.Right - width);
-            int tipY = button.Bounds.Bottom + 6;
-            if (tipY + height > monitor.Bottom) tipY = button.Bounds.Top - height - 6;
-            tipY = Math.Clamp(tipY, monitor.Top, Math.Max(monitor.Top, monitor.Bottom - height));
-            var bounds = new Rectangle(tipX, tipY, width, height);
-            using var background = new SolidBrush(Color.FromArgb(32, 32, 32));
-            using var border = new Pen(Color.FromArgb(85, 85, 85));
-            using var path = RoundedRect(bounds, Fluent.RadiusSmall);
-            g.FillPath(background, path);
-            g.DrawPath(border, path);
-            bounds.Inflate(-12, -8);
-            TextRenderer.DrawText(g, _toolTipText, font, bounds, Color.White, textFlags);
+            if (!Capture && MouseButtons == MouseButtons.None) _editor.CancelStroke();
+            base.OnMouseCaptureChanged(args);
         }
 
-        protected override void OnMouseUp(MouseEventArgs e)
+        protected override void OnKeyDown(KeyEventArgs args)
         {
-            if (_selected)
-            {
-                if (_marking)
-                {
-                    _marking = false;
-                    Capture = false;
-                    if (_editMode == EditMode.RectangleMark)
-                    {
-                        var rect = NormalizeRect(_markStart, ClampToSelection(e.Location));
-                        _previewMark = null;
-                        if (rect.Width >= 6 && rect.Height >= 6)
-                            _marks.Add(rect);
-                    }
-                    else if (_editMode == EditMode.Pen && _previewStroke is not null)
-                    {
-                        if (_previewStroke.Count >= 2)
-                            _strokes.Add(_previewStroke.ToList());
-                        _previewStroke = null;
-                    }
-                    Invalidate();
-                    return;
-                }
-
-                _dragMode = SelectionDragMode.None;
-                _resizeEdge = ResizeEdge.None;
-                Capture = false;
-                return;
-            }
-
-            if (_dragMode != SelectionDragMode.NewSelection) return;
-            _dragMode = SelectionDragMode.None;
-            if (_sel.Width > 4 && _sel.Height > 4)
-                EnterToolbarMode();
-        }
-
-        protected override void OnKeyDown(KeyEventArgs e)
-        {
-            ResetToolTip();
-            if (e.KeyCode == Keys.Escape)
-            {
-                DialogResult = DialogResult.Cancel;
-                Close();
-            }
-            else if (_selected)
-            {
-                if (e.Control && e.Shift && e.KeyCode == Keys.S)
-                {
-                    Confirm(RegionAction.SaveAs);
-                    e.Handled = true;
-                    return;
-                }
-                if (e.Control && e.KeyCode == Keys.Z)
-                {
-                    UndoAnnotation();
-                    e.Handled = true;
-                    return;
-                }
-
-                switch (e.KeyCode)
-                {
-                    case Keys.M: ToggleEditMode(EditMode.RectangleMark); break;
-                    case Keys.B: ToggleEditMode(EditMode.Pen); break;
-                    case Keys.P: Confirm(RegionAction.Pin);  break;
-                    case Keys.C:
-                    case Keys.Enter: Confirm(RegionAction.Copy); break;
-                    case Keys.S: Confirm(RegionAction.Save); break;
-                }
-            }
-            else if (e.KeyCode == Keys.Enter && _sel.Width > 0 && _sel.Height > 0)
-            {
-                EnterToolbarMode();
-            }
-        }
-
-        private void EnterToolbarMode()
-        {
-            SelectedScreenRect = ToScreenRect(_sel);
-            _selected = true;
-            _buttons = new List<ToolButton>
-            {
-                new() { Tool = RegionTool.RectangleMark, AccentColor = Fluent.AccentRed    },
-                new() { Tool = RegionTool.Pen,  IconName = FluentIcon.Pen,     AccentColor = Fluent.AccentBlue   },
-                new() { Tool = RegionTool.Pin,  IconName = FluentIcon.Pin,     Action = RegionAction.Pin,    AccentColor = Fluent.AccentPurple },
-                new() { Tool = RegionTool.Copy, IconName = FluentIcon.Copy,    Action = RegionAction.Copy,   AccentColor = Fluent.AccentBlue   },
-                new() { Tool = RegionTool.Save, IconName = FluentIcon.Save,    Action = RegionAction.Save,   AccentColor = Color.FromArgb(60, 60, 60) },
-                new() { Tool = RegionTool.SaveOptions, Action = RegionAction.Save, AccentColor = Color.FromArgb(60, 60, 60) },
-                new() { Tool = RegionTool.Cancel, IconName = FluentIcon.Dismiss, Action = RegionAction.Cancel, AccentColor = Fluent.AccentRed  }
-            };
-            Cursor = Cursors.Default;
-            Invalidate();
-        }
-
-        public Bitmap RenderSelectedImage()
-        {
-            var localRect = new Rectangle(_sel.X, _sel.Y, _sel.Width, _sel.Height);
-            var rendered = _snapshot.Clone(localRect, PixelFormat.Format32bppArgb);
-            using var g = Graphics.FromImage(rendered);
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            g.SetClip(new Rectangle(0, 0, rendered.Width, rendered.Height));
-            foreach (var mark in _marks)
-            {
-                var shifted = new RectangleF(mark.X - _sel.X, mark.Y - _sel.Y, mark.Width, mark.Height);
-                DrawMark(g, shifted, preview: false);
-            }
-            foreach (var stroke in _strokes)
-            {
-                var shifted = stroke.Select(p => new PointF(p.X - _sel.X, p.Y - _sel.Y)).ToList();
-                DrawStroke(g, shifted, preview: false);
-            }
-            return rendered;
-        }
-
-        private void HandleToolClick(RegionTool tool)
-        {
-            switch (tool)
-            {
-                case RegionTool.RectangleMark:
-                    ToggleEditMode(EditMode.RectangleMark);
-                    break;
-                case RegionTool.Pen:
-                    ToggleEditMode(EditMode.Pen);
-                    break;
-                case RegionTool.Pin:
-                    Confirm(RegionAction.Pin);
-                    break;
-                case RegionTool.Copy:
-                    Confirm(RegionAction.Copy);
-                    break;
-                case RegionTool.Save:
-                    Confirm(RegionAction.Save);
-                    break;
-                case RegionTool.SaveOptions:
-                    ShowSaveMenu();
-                    break;
-                case RegionTool.Cancel:
-                    Confirm(RegionAction.Cancel);
-                    break;
-            }
+            if (_selected && _editor.HandleKey(args)) return;
+            if (args.KeyCode == Keys.Escape) { Confirm(RegionAction.Cancel); return; }
+            if (!_selected) return;
+            if (args.Control && args.Shift && args.KeyCode == Keys.S) Confirm(RegionAction.SaveAs);
+            else if (args.KeyCode is Keys.Enter or Keys.C) Confirm(RegionAction.Copy);
+            else if (args.KeyCode == Keys.S) Confirm(RegionAction.Save);
+            else if (args.KeyCode == Keys.P) Confirm(RegionAction.Pin);
+            else return;
+            args.SuppressKeyPress = true;
         }
 
         private void ShowSaveMenu()
         {
-            ResetToolTip();
-            if (_saveMenu is null)
-            {
-                _saveMenu = new ContextMenuStrip { ShowItemToolTips = true };
-                _saveMenu.Items.Add(new ToolStripLabel("Save to") { ForeColor = SystemColors.GrayText });
-                _saveFolderLabel = new ToolStripLabel(_saveFolder)
-                {
-                    AutoSize = false,
-                    Size = new Size(360, 24),
-                    TextAlign = ContentAlignment.MiddleLeft,
-                    ToolTipText = _saveFolder
-                };
-                _saveMenu.Items.Add(_saveFolderLabel);
-                _saveMenu.Items.Add(new ToolStripSeparator());
-                var save = new ToolStripMenuItem("Save", FluentIcon.Get(FluentIcon.Save, 16, Color.FromArgb(60, 60, 60)))
-                {
-                    ShortcutKeyDisplayString = "S / Ctrl+S"
-                };
-                save.Click += (_, _) => Confirm(RegionAction.Save);
-                _saveMenu.Items.Add(save);
-                var saveAs = new ToolStripMenuItem("Save as...", FluentIcon.Get(FluentIcon.Folder, 16, Color.FromArgb(60, 60, 60)))
-                {
-                    ShortcutKeyDisplayString = "Ctrl+Shift+S"
-                };
-                saveAs.Click += (_, _) => Confirm(RegionAction.SaveAs);
-                _saveMenu.Items.Add(saveAs);
-                _saveMenu.Items.Add(new ToolStripSeparator());
-                var setFolder = new ToolStripMenuItem("Set save folder...", FluentIcon.Get(FluentIcon.Settings, 16, Color.FromArgb(60, 60, 60)));
-                setFolder.Click += (_, _) => SetSaveFolder();
-                _saveMenu.Items.Add(setFolder);
-            }
-            var anchor = _buttons.First(button => button.Tool == RegionTool.SaveOptions).Bounds;
-            _saveMenu.Show(this, new Point(anchor.Right - _saveMenu.PreferredSize.Width, anchor.Bottom + 4));
+            _saveMenu?.Dispose();
+            _saveMenu = new ContextMenuStrip();
+            _saveMenu.Items.Add(new ToolStripLabel("Save to") { ForeColor = SystemColors.GrayText });
+            _saveMenu.Items.Add(new ToolStripLabel(_saveFolder) { ToolTipText = _saveFolder });
+            _saveMenu.Items.Add(new ToolStripSeparator());
+            var saveAs = new ToolStripMenuItem("Save as...", FluentIcon.Get(FluentIcon.Save, 16, Color.DimGray)) { ShortcutKeyDisplayString = "Ctrl+Shift+S" };
+            saveAs.Click += (_, _) => Confirm(RegionAction.SaveAs); _saveMenu.Items.Add(saveAs);
+            var folder = new ToolStripMenuItem("Set save folder...", FluentIcon.Get(FluentIcon.Folder, 16, Color.DimGray));
+            folder.Click += (_, _) => SetSaveFolder(); _saveMenu.Items.Add(folder);
+            var anchor = _editor.Toolbar.ActionBounds("options");
+            _saveMenu.Show(new Point(anchor.Right - _saveMenu.PreferredSize.Width, anchor.Bottom + 4));
         }
 
         private void SetSaveFolder()
         {
-            ResetToolTip();
             _saveMenu?.Close();
-            using var dialog = new FolderBrowserDialog
-            {
-                Description = "Choose the default screenshot folder",
-                UseDescriptionForTitle = true,
-                SelectedPath = _saveFolder,
-                ShowNewFolderButton = true
-            };
+            using var dialog = new FolderBrowserDialog { Description = "Choose the default screenshot folder", UseDescriptionForTitle = true, SelectedPath = _saveFolder, ShowNewFolderButton = true };
             if (dialog.ShowDialog(this) != DialogResult.OK) return;
-
-            _saveFolder = dialog.SelectedPath;
-            _saveFolderChanged?.Invoke(_saveFolder);
-            if (_saveFolderLabel is not null)
-            {
-                _saveFolderLabel.Text = _saveFolder;
-                _saveFolderLabel.ToolTipText = _saveFolder;
-            }
-            Invalidate();
+            _saveFolder = dialog.SelectedPath; _settings.SaveFolder = _saveFolder; _settings.Save(); _saveFolderChanged?.Invoke(_saveFolder);
+            _editor.Toolbar.SetSaveFolder(_saveFolder);
         }
 
-        private void ToggleEditMode(EditMode mode)
+        public Bitmap RenderSelectedImage() => _editor.Export();
+        private Rectangle ToScreenRect(Rectangle rectangle) => new(_virt.X + rectangle.X, _virt.Y + rectangle.Y, rectangle.Width, rectangle.Height);
+        private void Confirm(RegionAction action)
         {
-            _editMode = _editMode == mode ? EditMode.None : mode;
-            Cursor = _editMode == EditMode.None ? Cursors.Default : Cursors.Cross;
-            Invalidate();
+            _editor.CommitText(); Action = action; SelectedScreenRect = ToScreenRect(_sel);
+            DialogResult = action == RegionAction.Cancel ? DialogResult.Cancel : DialogResult.OK; Close();
         }
 
-        private void UndoAnnotation()
+        private Rectangle ResizeSelection(Rectangle origin, ResizeEdge edge, Point point)
         {
-            if (_strokes.Count > 0)
-            {
-                _strokes.RemoveAt(_strokes.Count - 1);
-                Invalidate();
-                return;
-            }
-
-            if (_marks.Count > 0)
-            {
-                _marks.RemoveAt(_marks.Count - 1);
-                Invalidate();
-            }
-        }
-
-        private Rectangle ToScreenRect(Rectangle r) => new(_virt.X + r.X, _virt.Y + r.Y, r.Width, r.Height);
-
-        private Rectangle ClampSelection(Rectangle r)
-        {
-            int w = Math.Max(12, Math.Min(r.Width, _virt.Width));
-            int h = Math.Max(12, Math.Min(r.Height, _virt.Height));
-            int x = Math.Clamp(r.X, 0, Math.Max(0, _virt.Width - w));
-            int y = Math.Clamp(r.Y, 0, Math.Max(0, _virt.Height - h));
-            return new Rectangle(x, y, w, h);
-        }
-
-        private Rectangle ResizeSelection(Rectangle origin, ResizeEdge edge, Point p)
-        {
-            const int minSize = 20;
             int left = origin.Left, top = origin.Top, right = origin.Right, bottom = origin.Bottom;
-
-            if (edge.HasFlag(ResizeEdge.Left)) left = Math.Clamp(p.X, 0, right - minSize);
-            if (edge.HasFlag(ResizeEdge.Right)) right = Math.Clamp(p.X, left + minSize, _virt.Width);
-            if (edge.HasFlag(ResizeEdge.Top)) top = Math.Clamp(p.Y, 0, bottom - minSize);
-            if (edge.HasFlag(ResizeEdge.Bottom)) bottom = Math.Clamp(p.Y, top + minSize, _virt.Height);
-
+            if (edge.HasFlag(ResizeEdge.Left)) left = Math.Clamp(point.X, 0, right - 4);
+            if (edge.HasFlag(ResizeEdge.Right)) right = Math.Clamp(point.X, left + 4, Width);
+            if (edge.HasFlag(ResizeEdge.Top)) top = Math.Clamp(point.Y, 0, bottom - 4);
+            if (edge.HasFlag(ResizeEdge.Bottom)) bottom = Math.Clamp(point.Y, top + 4, Height);
             return Rectangle.FromLTRB(left, top, right, bottom);
         }
 
-        private ResizeEdge HitTestResize(Point p)
+        private ResizeEdge HitTestResize(Point point)
         {
-            const int grip = 9;
-            if (!_sel.Contains(p) && !Inflate(_sel, grip).Contains(p)) return ResizeEdge.None;
-
+            var inflated = _sel; inflated.Inflate(8, 8);
+            if (!inflated.Contains(point)) return ResizeEdge.None;
             ResizeEdge edge = ResizeEdge.None;
-            if (Math.Abs(p.X - _sel.Left) <= grip) edge |= ResizeEdge.Left;
-            if (Math.Abs(p.X - _sel.Right) <= grip) edge |= ResizeEdge.Right;
-            if (Math.Abs(p.Y - _sel.Top) <= grip) edge |= ResizeEdge.Top;
-            if (Math.Abs(p.Y - _sel.Bottom) <= grip) edge |= ResizeEdge.Bottom;
+            if (Math.Abs(point.X - _sel.Left) <= 8) edge |= ResizeEdge.Left;
+            if (Math.Abs(point.X - _sel.Right) <= 8) edge |= ResizeEdge.Right;
+            if (Math.Abs(point.Y - _sel.Top) <= 8) edge |= ResizeEdge.Top;
+            if (Math.Abs(point.Y - _sel.Bottom) <= 8) edge |= ResizeEdge.Bottom;
             return edge;
         }
 
-        private static Rectangle Inflate(Rectangle r, int amount)
+        private static Cursor CursorForResize(ResizeEdge edge, bool inside) => edge switch
         {
-            r.Inflate(amount, amount);
-            return r;
-        }
-
-        private static Cursor CursorForResize(ResizeEdge edge, bool inside)
-        {
-            return edge switch
-            {
-                ResizeEdge.Left or ResizeEdge.Right => Cursors.SizeWE,
-                ResizeEdge.Top or ResizeEdge.Bottom => Cursors.SizeNS,
-                ResizeEdge.Left | ResizeEdge.Top or ResizeEdge.Right | ResizeEdge.Bottom => Cursors.SizeNWSE,
-                ResizeEdge.Right | ResizeEdge.Top or ResizeEdge.Left | ResizeEdge.Bottom => Cursors.SizeNESW,
-                _ when inside => Cursors.SizeAll,
-                _ => Cursors.Default
-            };
-        }
-
-        private Point ClampToSelection(Point p) => new(
-            Math.Clamp(p.X, _sel.Left, _sel.Right),
-            Math.Clamp(p.Y, _sel.Top, _sel.Bottom));
-
-        private static RectangleF NormalizeRect(Point a, Point b) => RectangleF.FromLTRB(
-            Math.Min(a.X, b.X), Math.Min(a.Y, b.Y), Math.Max(a.X, b.X), Math.Max(a.Y, b.Y));
-
-        private void DrawAnnotations(Graphics g)
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            using var clip = new Region(_sel);
-            var oldClip = g.Clip;
-            g.Clip = clip;
-
-            foreach (var mark in _marks)
-                DrawMark(g, mark, preview: false);
-            if (_previewMark is { } preview)
-                DrawMark(g, preview, preview: true);
-
-            foreach (var stroke in _strokes)
-                DrawStroke(g, stroke, preview: false);
-            if (_previewStroke is { Count: > 1 } previewStroke)
-                DrawStroke(g, previewStroke, preview: true);
-
-            g.Clip = oldClip;
-        }
-
-        private static void DrawMark(Graphics g, RectangleF rect, bool preview)
-        {
-            if (rect.Width < 2 || rect.Height < 2) return;
-            using var glow = new Pen(Color.FromArgb(190, 255, 255, 255), preview ? 6f : 7f) { LineJoin = LineJoin.Round };
-            using var outline = new Pen(Color.FromArgb(245, 255, 42, 42), preview ? 3.5f : 5f) { LineJoin = LineJoin.Round };
-            g.DrawRectangle(glow, rect.X, rect.Y, rect.Width, rect.Height);
-            g.DrawRectangle(outline, rect.X, rect.Y, rect.Width, rect.Height);
-        }
-
-        private static void DrawStroke(Graphics g, IReadOnlyList<PointF> points, bool preview)
-        {
-            if (points.Count < 2) return;
-            using var glow = new Pen(Color.FromArgb(190, 255, 255, 255), preview ? 8f : 9f)
-            {
-                StartCap = LineCap.Round,
-                EndCap = LineCap.Round,
-                LineJoin = LineJoin.Round
-            };
-            using var pen = new Pen(Color.FromArgb(245, 255, 42, 42), preview ? 4f : 5f)
-            {
-                StartCap = LineCap.Round,
-                EndCap = LineCap.Round,
-                LineJoin = LineJoin.Round
-            };
-            var arr = points.ToArray();
-            g.DrawLines(glow, arr);
-            g.DrawLines(pen, arr);
-        }
-
-        private void DrawResizeHandles(Graphics g)
-        {
-            const int size = 15;
-            foreach (var c in HandleCenters())
-            {
-                var rect = new Rectangle(c.X - size / 2, c.Y - size / 2, size, size);
-                var shadow = rect;
-                shadow.Offset(1, 2);
-                using var shadowBrush = new SolidBrush(Color.FromArgb(90, 0, 0, 0));
-                using var bg = new SolidBrush(Color.White);
-                using var pen = new Pen(Fluent.AccentHover, 3f);
-                g.FillEllipse(shadowBrush, shadow);
-                g.FillEllipse(bg, rect);
-                g.DrawEllipse(pen, rect);
-            }
-        }
+            ResizeEdge.Left or ResizeEdge.Right => Cursors.SizeWE,
+            ResizeEdge.Top or ResizeEdge.Bottom => Cursors.SizeNS,
+            ResizeEdge.Left | ResizeEdge.Top or ResizeEdge.Right | ResizeEdge.Bottom => Cursors.SizeNWSE,
+            ResizeEdge.Right | ResizeEdge.Top or ResizeEdge.Left | ResizeEdge.Bottom => Cursors.SizeNESW,
+            _ => inside ? Cursors.SizeAll : Cursors.Default
+        };
 
         private IEnumerable<Point> HandleCenters()
         {
-            int cx = _sel.Left + _sel.Width / 2;
-            int cy = _sel.Top + _sel.Height / 2;
-            yield return new Point(_sel.Left, _sel.Top);
-            yield return new Point(cx, _sel.Top);
-            yield return new Point(_sel.Right, _sel.Top);
-            yield return new Point(_sel.Right, cy);
-            yield return new Point(_sel.Right, _sel.Bottom);
-            yield return new Point(cx, _sel.Bottom);
-            yield return new Point(_sel.Left, _sel.Bottom);
-            yield return new Point(_sel.Left, cy);
+            int centerX = _sel.Left + _sel.Width / 2, centerY = _sel.Top + _sel.Height / 2;
+            return new[] { new Point(_sel.Left, _sel.Top), new Point(centerX, _sel.Top), new Point(_sel.Right, _sel.Top), new Point(_sel.Right, centerY), new Point(_sel.Right, _sel.Bottom), new Point(centerX, _sel.Bottom), new Point(_sel.Left, _sel.Bottom), new Point(_sel.Left, centerY) };
         }
 
-        private static void DrawToolIcon(Graphics g, ToolButton b, Color color)
+        protected override void Dispose(bool disposing)
         {
-            if (b.Tool == RegionTool.SaveOptions)
-            {
-                using var font = Fluent.IconFont(10f);
-                TextRenderer.DrawText(g, "\uE70D", font, b.Bounds, color,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-                return;
-            }
-            if (b.Tool == RegionTool.RectangleMark)
-            {
-                var r = Centered(b.Bounds, 24, 18);
-                using var pen = new Pen(color, 3f) { LineJoin = LineJoin.Round };
-                g.DrawRectangle(pen, r.X, r.Y, r.Width, r.Height);
-                return;
-            }
-
-            FluentIcon.Draw(g, b.IconName, b.Bounds, color, sizeOverride: 24);
-        }
-
-        private static Rectangle Centered(Rectangle bounds, int width, int height) => new(
-            bounds.Left + (bounds.Width - width) / 2,
-            bounds.Top + (bounds.Height - height) / 2,
-            width,
-            height);
-
-        private void Confirm(RegionAction a)
-        {
-            Action = a;
-            DialogResult = a == RegionAction.Cancel ? DialogResult.Cancel : DialogResult.OK;
-            Close();
-        }
-
-        private static GraphicsPath RoundedRect(Rectangle r, int radius)
-        {
-            var p = new GraphicsPath();
-            int d = radius * 2;
-            p.AddArc(r.X, r.Y, d, d, 180, 90);
-            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-            p.CloseFigure();
-            return p;
-        }
-
-        private sealed class ToolButton
-        {
-            public RegionTool Tool;
-            public string IconName = "";
-            public RegionAction Action;
-            public Rectangle Bounds;
-            public bool Hovered;
-            public Color AccentColor = Color.Gray;
+            if (disposing) { _saveMenu?.Dispose(); _editor.Dispose(); }
+            base.Dispose(disposing);
         }
     }
 }

@@ -37,6 +37,8 @@ internal sealed class Settings
 
     public bool RunAtStartup { get; set; } = false;
 
+    public AnnotationPreferences Annotation { get; set; } = new();
+
     [JsonIgnore]
     public string FilePath => GetFilePath();
 

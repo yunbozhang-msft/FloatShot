@@ -70,16 +70,23 @@ Manual install validation:
 
 - Hovering over each button shows its name and shortcut after a short delay; moving away or clicking hides the hint.
 - Toolbar and hints remain on the selected monitor, including selections near its bottom edge.
-- Rectangle mark draws an outline without a filled center.
-- Pen mark draws freehand strokes.
-- `Ctrl+Z` undoes the most recent annotation.
+- New captures start without a drawing tool selected; clicking an active tool again restores frame move/resize and hides its options.
+- Rectangle supports Outline and Solid; Solid hides the unused width control and fully covers the selected area.
+- Arrow and Pen use the chosen color and width; highlighter stays translucent, including self-overlapping strokes.
+- Mosaic supports Rectangle and Brush, exposes only a Mosaic strength slider, and leaves pixels outside the mask untouched.
+- Text supports color, size, bold, multiline and non-English input. Click away or switch tools to finish; Esc while typing cancels only the current text edit.
+- Text remains editable on double-click and movable by dragging in selection mode.
+- Typing letters such as C, S, P, R, and M inside text must not trigger capture actions or tool changes.
+- `Ctrl+Z` undoes the latest operation across all tools, including text moves and edits; `Ctrl+Y` and `Ctrl+Shift+Z` redo it.
+- Tool preferences survive a restart, are shared with pinned images, and do not reset existing save folders or hotkeys. Cancelling a capture does not undo preference changes.
+- Preview, clipboard, and saved image agree, without exporting the toolbar, text editor border, selection frame, or tooltips.
 - Pin creates a floating pinned image with annotations included.
 - Copy places the annotated image on the clipboard.
 - `Enter`, `C`, and `Ctrl+C` invoke Copy without creating an image file or save directory.
 - Save remains a neutral icon and writes directly to the configured folder; no Save As dialog appears.
 - With Open folder after capture disabled (the default), quick Save must leave the foreground application unchanged.
 - Hovering over Save shows the configured destination and shortcut.
-- The small Save arrow, or right-clicking Save, opens a menu containing the destination, Save, Save as, and Set save folder.
+- The small Save arrow, or right-clicking Save, opens a menu containing the destination, Save as, and Set save folder, without a duplicate Copy command.
 - Set save folder opens a folder picker without saving or discarding the current screenshot selection.
 - Confirming a folder immediately updates the menu path and Save hover hint, and remembers the preference across restarts even if this screenshot is cancelled.
 - Cancelling the folder picker leaves the configured folder and current selection unchanged.
@@ -95,6 +102,9 @@ Manual install validation:
 ## Pinned Images
 
 - Pinned image can be dragged.
+- Space and the Annotate menu toggle the shared toolbar. A drawing-tool shortcut also reveals it; deselecting the tool restores image dragging.
+- All annotation tools work at 50%, 100%, and 200% zoom; copy/save export at original image resolution without shifting annotations.
+- Pinned toolbar stays on-screen and outside the image when space is available; closing the image closes its toolbar.
 - Mouse wheel zooms in and out.
 - Double-click closes the pinned image.
 - Right-click Copy, Save, Reset zoom, and Close work.

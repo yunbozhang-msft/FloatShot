@@ -1,5 +1,5 @@
 #define MyAppName "FloatShot"
-#define MyAppVersion "0.2.7"
+#define MyAppVersion "0.3.0"
 #define MyAppPublisher "FloatShot"
 #define MyAppExeName "FloatShot.exe"
 
