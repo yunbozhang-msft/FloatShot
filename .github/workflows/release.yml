@@ -26,6 +26,10 @@ jobs:
       - name: Show .NET SDK
         run: dotnet --info
 
+      - name: Test Settings menu and dropdown
+        timeout-minutes: 5
+        run: dotnet run --project tests/FloatShot.UiTests -c Debug
+
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
 
