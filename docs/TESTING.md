@@ -30,6 +30,35 @@ Expected result: build and publish succeed with no warnings or errors.
 - Package only the publish output, not a workspace archive or local temporary files.
 - Removing a sensitive file from the current tree does not remove it from Git history or older release assets; review those separately when necessary.
 
+## Settings UI Regression Tests
+
+Run on Windows with .NET 10. The test opens real WinForms menus and modal Settings
+dialogs on an STA message loop, with native mouse messages and the WinForms keyboard
+dispatch path. It does not call the Settings menu item's Click handler directly.
+
+```powershell
+dotnet run --project tests/FloatShot.UiTests -c Debug
+# Optional interactive host for actual desktop mouse testing:
+dotnet run --project tests/FloatShot.UiTests -c Debug -- --interactive
+```
+
+The test uses production `BuildTrayMenu` and `OpenSettings` via reflection, with an
+isolated context that omits startup side effects (global hotkeys, notification icon,
+and reading/writing user settings). It covers persistent tray menus and the floating
+menu's deferred-disposal lifecycle, not the Windows notification-area shell itself.
+
+- First click and repeated open/close, via mouse and keyboard, must open Settings.
+- Menu dismissal must not open Settings; temporary menus must be disposed safely.
+- All four modes must be selectable through the native ComboBox; its popup must stay
+  visible for longer than the 500 ms topmost refresh interval.
+- The topmost timer must pause during the dialog and resume after Cancel.
+- Cancel must preserve the original capture mode.
+- A 90-second watchdog fails the process if a modal loop blocks the test.
+
+To test an already-built version, set `FLOATSHOT_UI_TEST_ASSEMBLY` to the absolute
+path of its `FloatShot.dll`. Omit this variable for normal source/CI testing.
+The release workflow runs this suite before packaging or publishing an installer.
+
 ## Installer Checks
 
 ```powershell

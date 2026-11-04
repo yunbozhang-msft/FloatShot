@@ -100,18 +100,15 @@ internal sealed class TrayContext : ApplicationContext
 
     private void AddDeferredMenuItem(ContextMenuStrip menu, string text, Action action)
     {
-        bool requested = false;
         var item = new ToolStripMenuItem(text);
-        item.Click += (_, _) => requested = true;
-        menu.Closed += (_, _) =>
+        item.Click += (_, _) =>
         {
-            if (!requested || _uiDispatcher.IsDisposed) return;
-            requested = false;
+            if (_uiDispatcher.IsDisposed) return;
 
-            // Opening a modal form from ToolStripItem.Click starts a nested
-            // message loop while the ContextMenuStrip still owns popup input.
-            // Queue the dialog until after the menu and its popup window have
-            // fully closed so child popups such as ComboBox drop-downs work.
+            // WinForms can raise Closed before the item's Click. Queue from
+            // Click itself so the first selection is not lost. Dispatch via
+            // this long-lived control because floating menus are disposed
+            // after closing; open the dialog after menu input has unwound.
             _uiDispatcher.BeginInvoke(action);
         };
         menu.Items.Add(item);

@@ -1,0 +1,21 @@
+name: UI regression tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  settings:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test Settings menu and dropdown
+        run: dotnet run --project tests/FloatShot.UiTests -c Debug
