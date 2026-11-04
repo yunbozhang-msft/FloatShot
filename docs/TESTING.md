@@ -136,6 +136,7 @@ Manual install validation:
 - The Pictures path follows Windows known-folder resolution on English and non-English systems, including redirected folders.
 - Existing saved locations, including the old `Screenshots` directory and custom paths with spaces or non-English characters, are preserved after upgrading and restarting.
 - Save folder can be changed with Browse.
+- Open Settings from both the tray menu and the floating-button context menu. The Default mode combo box opens on the first click and shows all four capture modes.
 - Default mode changes the floating button action.
 - Hotkey fields persist after Save.
 - Behavior checkboxes persist after Save.

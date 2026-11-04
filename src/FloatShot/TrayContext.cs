@@ -12,10 +12,14 @@ internal sealed class TrayContext : ApplicationContext
     private readonly HotkeyWindow _hotkeys;
     private readonly System.Windows.Forms.Timer _topMostTimer;
     private readonly MessageWindow _msgWindow;
+    private readonly Control _uiDispatcher = new();
     private FloatingButton? _button;
 
     public TrayContext()
     {
+        // Create a UI-thread handle that can queue work after popup menus have
+        // completed their close cycle.
+        _uiDispatcher.CreateControl();
         _settings = Settings.Load();
 
         _tray = new NotifyIcon
@@ -80,7 +84,7 @@ internal sealed class TrayContext : ApplicationContext
         }
 
         AddMenuItem(menu, "Open save folder",   (_, _) => OpenFolder());
-        AddMenuItem(menu, "Settings...",        (_, _) => OpenSettings());
+        AddDeferredMenuItem(menu, "Settings...", OpenSettings);
         menu.Items.Add(new ToolStripSeparator());
         AddMenuItem(menu, "About FloatShot",    (_, _) => ShowAbout());
         AddMenuItem(menu, "Exit",               (_, _) => ExitThread());
@@ -91,6 +95,25 @@ internal sealed class TrayContext : ApplicationContext
     {
         var item = new ToolStripMenuItem(text);
         item.Click += onClick;
+        menu.Items.Add(item);
+    }
+
+    private void AddDeferredMenuItem(ContextMenuStrip menu, string text, Action action)
+    {
+        bool requested = false;
+        var item = new ToolStripMenuItem(text);
+        item.Click += (_, _) => requested = true;
+        menu.Closed += (_, _) =>
+        {
+            if (!requested || _uiDispatcher.IsDisposed) return;
+            requested = false;
+
+            // Opening a modal form from ToolStripItem.Click starts a nested
+            // message loop while the ContextMenuStrip still owns popup input.
+            // Queue the dialog until after the menu and its popup window have
+            // fully closed so child popups such as ComboBox drop-downs work.
+            _uiDispatcher.BeginInvoke(action);
+        };
         menu.Items.Add(item);
     }
 
@@ -202,15 +225,23 @@ internal sealed class TrayContext : ApplicationContext
 
     private void OpenSettings()
     {
-        using var dlg = new SettingsForm(_settings);
-        if (dlg.ShowDialog() == DialogResult.OK)
+        _topMostTimer.Stop();
+        try
         {
-            if (dlg.RestartHotkeysRequired) RegisterHotkeys();
-            if (dlg.RestartButtonRequired)
+            using var dlg = new SettingsForm(_settings);
+            if (dlg.ShowDialog() == DialogResult.OK)
             {
-                if (_settings.ShowFloatingButton) ShowOrCreateButton();
-                else HideButton();
+                if (dlg.RestartHotkeysRequired) RegisterHotkeys();
+                if (dlg.RestartButtonRequired)
+                {
+                    if (_settings.ShowFloatingButton) ShowOrCreateButton();
+                    else HideButton();
+                }
             }
+        }
+        finally
+        {
+            _topMostTimer.Start();
         }
     }
 
@@ -250,6 +281,7 @@ internal sealed class TrayContext : ApplicationContext
             _hotkeys?.Dispose();
             _button?.Dispose();
             _msgWindow?.Dispose();
+            _uiDispatcher?.Dispose();
             if (_tray is not null)
             {
                 _tray.Visible = false;
